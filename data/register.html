@@ -82,7 +82,11 @@
 </head>
 <body>
     <div class="app-shell">
-        <aside class="sidebar">
+        <button class="menu-toggle" id="menuToggle" aria-label="Open navigation menu">
+            <span></span><span></span><span></span>
+        </button>
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+        <aside class="sidebar" id="sidebar">
             <h2>Hemoglobin System</h2>
             <nav>
                 <a class="sidebar-link" href="/">Dashboard</a>
@@ -283,5 +287,6 @@
             }
         });
     </script>
+    <script src="sidebar.js"></script>
 </body>
 </html>
