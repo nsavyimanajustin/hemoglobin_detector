@@ -1,0 +1,7 @@
+.pio/
+node_modules/
+build/
+build.log
+*.log
+*.tmp
+backup/

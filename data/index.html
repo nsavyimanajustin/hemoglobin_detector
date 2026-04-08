@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hemoglobin Detector Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+</head>
+
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <h2>Hemoglobin System</h2>
+            <nav>
+                <a class="sidebar-link active" href="/">Dashboard</a>
+                <a class="sidebar-link" href="/register.html">Patient Register</a>
+                <a class="sidebar-link" href="/queue.html">Queue Status</a>
+            </nav>
+        </aside>
+
+        <div class="content-shell">
+            <div class="container">
+                <header>
+                    <h1>🩸 Hemoglobin Detector</h1>
+                    <div class="header-info">
+                        <span id="status" class="status-badge">Offline</span>
+                        <span id="uptime" class="uptime">Uptime: --:--:--</span>
+                    </div>
+                </header>
+
+        <main>
+            <!-- Measurement Section -->
+            <section class="measurements">
+                <h2>Current Measurements</h2>
+                <div class="cards-grid">
+                    <!-- Heart Rate Card -->
+                    <div class="card heart-rate">
+                        <div class="card-header">
+                            <h3>Heart Rate</h3>
+                            <span class="unit">BPM</span>
+                        </div>
+                        <div class="gauge">
+                            <div class="gauge-value" id="bpm-value">--</div>
+                        </div>
+                        <canvas id="bpmChart"></canvas>
+                    </div>
+
+                    <!-- SpO2 Card -->
+                    <div class="card spo2">
+                        <div class="card-header">
+                            <h3>Blood Oxygen</h3>
+                            <span class="unit">%</span>
+                        </div>
+                        <div class="gauge">
+                            <div class="gauge-value" id="spo2-value">--</div>
+                        </div>
+                        <canvas id="spo2Chart"></canvas>
+                    </div>
+
+                    <!-- Hemoglobin Card -->
+                    <div class="card hemoglobin">
+                        <div class="card-header">
+                            <h3>Hemoglobin</h3>
+                            <span class="unit">g/dL</span>
+                        </div>
+                        <div class="gauge">
+                            <div class="gauge-value" id="hb-value">--</div>
+                        </div>
+                        <canvas id="hbChart"></canvas>
+                    </div>
+
+                    <!-- Status Card -->
+                    <div class="card status">
+                        <div class="card-header">
+                            <h3>Anemia Status</h3>
+                        </div>
+                        <div class="status-display">
+                            <div class="status-badge large" id="status-value">Loading...</div>
+                            <p id="status-description" class="status-desc">--</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Trends Section -->
+            <section class="trends">
+                <h2>Measurement Trends</h2>
+                <div class="chart-container">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </section>
+
+            <!-- Details Section -->
+            <section class="details">
+                <h2>Sensor Details</h2>
+                <div class="details-grid">
+                    <div class="detail-item">
+                        <label>IR LED Value:</label>
+                        <span id="ir-value">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Red LED Value:</label>
+                        <span id="red-value">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Last Update:</label>
+                        <span id="last-update">--</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Measuring:</label>
+                        <span id="measuring" class="badge">No</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Active Patient:</label>
+                        <span id="active-patient">None</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Workflow:</label>
+                        <span id="workflow-message">Register and queue a patient first</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+                <footer>
+                    <p>Hemoglobin Detector v1.0 | Non-invasive Measurement System</p>
+                    <p class="disclaimer">⚠️ This device is for educational and research purposes only. Not a medical device.
+                    </p>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

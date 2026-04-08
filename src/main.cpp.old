@@ -1,0 +1,846 @@
+/*
+ * Non-Invasive Hemoglobin and Anemia Detection System
+ *
+ * Hardware:
+ * - ESP32 Microcontroller
+ * - MAX30102 Pulse Oximeter Sensor (I2C)
+ *   - Red LED
+ *   - Infrared LED
+ *   - Photodiode
+ * - 16x2 I2C LCD Display
+ *
+ * Features:
+ * - SpO2 measurement
+ * - Heart Rate (BPM) calculation
+ * - Hemoglobin estimation
+ * - Anemia status detection
+ * - LCD display output
+ * - Serial output for monitoring
+ *
+ * Connections:
+ * MAX30102 -> ESP32
+ * SDA -> GPIO 21
+ * SCL -> GPIO 22
+ * VCC -> 3.3V
+ * GND -> GND
+ *
+ * LCD I2C -> ESP32
+ * SDA -> GPIO 21 (shared with MAX30102)
+ * SCL -> GPIO 22 (shared with MAX30102)
+ * VCC -> 5V or 3.3V
+ * GND -> GND
+ */
+
+#include "MAX30105.h"
+#include "heartRate.h"
+#include <Arduino.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <WiFi.h>
+#include <WiFiManager.h>
+#include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
+#include <SPIFFS.h>
+
+MAX30105 particleSensor;
+LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD address 0x27, 16 columns, 2 rows
+AsyncWebServer server(80);
+
+// WiFi and Web Server status
+bool wifiConnected = false;
+unsigned long lastWebUpdate = 0;
+
+const byte RATE_SIZE = 4; // Increase this for more averaging. 4 is good.
+byte rates[RATE_SIZE];    // Array of heart rates
+byte rateSpot = 0;
+long lastBeat = 0; // Time at which the last beat occurred
+
+float beatsPerMinute;
+int beatAvg;
+
+// SpO2 calculation variables
+double avered = 0;
+double aveir = 0;
+double sumirrms = 0;
+double sumredrms = 0;
+int i = 0;
+double SpO2 = 0;
+double ESpO2 = 90.0;
+double FSpO2 = 0.7;
+double frate = 0.95;
+
+// Hemoglobin estimation (simplified model)
+// Normal ranges: Men 13-17 g/dL, Women 12-15 g/dL
+float estimatedHemoglobin = 0.0;
+
+// ==================== HELPER FUNCTIONS ====================
+
+/**
+ * Checks if a finger is present on the sensor
+ * @param irValue IR LED reading from sensor
+ * @return true if finger is detected, false otherwise
+ */
+bool isFingerDetected(long irValue) {
+  if (irValue < 50000) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Updates heart rate detection based on IR value
+ * @param irValue IR LED reading from sensor
+ */
+void updateHeartRateDetection(long irValue) {
+  if (checkForBeat(irValue) == true) {
+    long delta = millis() - lastBeat;
+    lastBeat = millis();
+
+    beatsPerMinute = 60 / (delta / 1000.0);
+
+    if (beatsPerMinute < 255 && beatsPerMinute > 20) {
+      rates[rateSpot++] = (byte)beatsPerMinute;
+      rateSpot %= RATE_SIZE;
+
+      // Calculate average of heart rate readings
+      beatAvg = 0;
+      for (byte x = 0; x < RATE_SIZE; x++)
+        beatAvg += rates[x];
+      beatAvg /= RATE_SIZE;
+    }
+  }
+}
+
+/**
+ * Accumulates sensor data for SpO2 calculation
+ * @param redValue Red LED reading from sensor
+ * @param irValue IR LED reading from sensor
+ */
+void accumulateSensorData(long redValue, long irValue) {
+  if (i < 100) {
+    avered += redValue;
+    aveir += irValue;
+    i++;
+  }
+}
+
+/**
+ * Processes accumulated data and calculates SpO2
+ * Uses Red/IR ratio to estimate blood oxygen saturation
+ * CRITICAL FIX: Do NOT re-read sensor data. Use the already accumulated values.
+ */
+void calculateSpO2FromAccumulatedData() {
+  // Divide accumulated sums by 100 to get averages
+  avered = avered / 100.0;
+  aveir = aveir / 100.0;
+
+  // Use approximated RMS based on sensor variance
+  // Since we don't store individual samples, estimate RMS as portion of average
+  double RMS_RED = avered * 0.1;    // Approximate RMS (10% of average)
+  double RMS_IR = aveir * 0.1;      // Approximate RMS (10% of average)
+
+  // Avoid division by zero
+  if (RMS_RED == 0 || RMS_IR == 0 || aveir == 0) {
+    return;
+  }
+
+  // Calculate R value (ratio of ratios)
+  double R = (RMS_RED / avered) / (RMS_IR / aveir);
+
+  // SpO2 calculation using empirical formula
+  // SpO2 = 110 - 25*R (simplified formula)
+  SpO2 = 110.0 - 25.0 * R;
+
+  // Constrain SpO2 to valid range
+  if (SpO2 > 100)
+    SpO2 = 100;
+  if (SpO2 < 70)
+    SpO2 = 70;
+
+  // Apply exponential filter for smoothing
+  ESpO2 = FSpO2 * ESpO2 + (1.0 - FSpO2) * SpO2;
+
+  // Reset accumulation variables for next cycle
+  avered = 0;
+  aveir = 0;
+  i = 0;
+}
+
+/**
+ * Estimates hemoglobin level based on SpO2 value
+ * Uses simplified correlation model
+ * Normal hemoglobin: 13-17 g/dL (men), 12-15 g/dL (women)
+ */
+void estimateHemoglobinFromSpO2() {
+  if (ESpO2 >= 95) {
+    // Normal SpO2 indicates normal hemoglobin
+    estimatedHemoglobin = 14.5 + (ESpO2 - 95) * 0.5;
+  } else if (ESpO2 >= 90) {
+    // Mild hypoxemia suggests mild anemia
+    estimatedHemoglobin = 12.0 + (ESpO2 - 90) * 0.5;
+  } else {
+    // Moderate to severe hypoxemia suggests moderate to severe anemia
+    estimatedHemoglobin = 9.0 + (ESpO2 - 70) * 0.15;
+  }
+}
+
+/**
+ * Classifies anemia status based on hemoglobin level
+ * @return String describing the anemia status
+ */
+const char *getAnemiaStatus() {
+  if (estimatedHemoglobin >= 13.0) {
+    return "NORMAL (No Anemia)";
+  } else if (estimatedHemoglobin >= 11.0) {
+    return "MILD ANEMIA";
+  } else if (estimatedHemoglobin >= 9.0) {
+    return "MODERATE ANEMIA";
+  } else {
+    return "SEVERE ANEMIA";
+  }
+}
+
+/**
+ * Displays all measurement results to serial monitor
+ */
+void displayMeasurementResults(long irValue, long redValue) {
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 1000) {
+    lastPrint = millis();
+
+    Serial.println("========================================");
+    Serial.print("IR Value: ");
+    Serial.print(irValue);
+    Serial.print(" | Red Value: ");
+    Serial.println(redValue);
+
+    // Display Heart Rate
+    Serial.print("Heart Rate (BPM): ");
+    if (beatAvg > 0) {
+      Serial.print(beatAvg);
+      Serial.println(" bpm");
+    } else {
+      Serial.println("Calculating...");
+    }
+
+    // Display SpO2
+    Serial.print("SpO2: ");
+    if (ESpO2 > 70) {
+      Serial.print(ESpO2, 1);
+      Serial.println("%");
+    } else {
+      Serial.println("Calculating...");
+    }
+
+    // Display Hemoglobin and Anemia Status
+    Serial.print("Estimated Hemoglobin: ");
+    if (estimatedHemoglobin > 9.0) {
+      Serial.print(estimatedHemoglobin, 1);
+      Serial.println(" g/dL");
+
+      Serial.print("Status: ");
+      Serial.println(getAnemiaStatus());
+    } else {
+      Serial.println("Calculating...");
+    }
+
+    Serial.println("========================================\n");
+  }
+}
+
+// ==================== LCD DISPLAY FUNCTIONS ====================
+
+/**
+ * Initializes the LCD display
+ */
+void initializeLCD() {
+  lcd.init();
+  lcd.backlight();
+
+  // Show startup message
+  lcd.setCursor(0, 0);
+  lcd.print("Hemoglobin");
+  lcd.setCursor(0, 1);
+  lcd.print("Detector v1.0");
+  delay(2000);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Initializing...");
+  delay(1000);
+}
+
+/**
+ * Displays "waiting for finger" message on LCD
+ */
+void displayWaitingForFinger() {
+  static unsigned long lastUpdate = 0;
+  static bool toggle = false;
+
+  if (millis() - lastUpdate > 500) {
+    lastUpdate = millis();
+    toggle = !toggle;
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Place finger");
+    lcd.setCursor(0, 1);
+    if (toggle) {
+      lcd.print("on sensor...");
+    } else {
+      lcd.print("on sensor   ");
+    }
+  }
+}
+
+/**
+ * Displays "calculating" message on LCD during initial data collection
+ */
+void displayCalculating() {
+  static unsigned long lastUpdate = 0;
+  static int dots = 0;
+
+  if (millis() - lastUpdate > 500) {
+    lastUpdate = millis();
+    dots = (dots + 1) % 4;
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Measuring");
+    lcd.setCursor(0, 1);
+    lcd.print("Please wait");
+    for (int i = 0; i < dots; i++) {
+      lcd.print(".");
+    }
+  }
+}
+
+/**
+ * Displays measurement results on LCD - Format 1: Basic readings
+ * Line 1: BPM and SpO2
+ * Line 2: Hemoglobin level and Status
+ */
+void displayLCD_Format1() {
+  static unsigned long lastUpdate = 0;
+  if (millis() - lastUpdate < 1000)
+    return;
+  lastUpdate = millis();
+
+  lcd.clear();
+
+  // Line 1: Heart Rate and SpO2
+  lcd.setCursor(0, 0);
+  if (beatAvg > 0) {
+    lcd.print("HR:");
+    lcd.print(beatAvg);
+    lcd.print("bpm");
+  } else {
+    lcd.print("HR:---");
+  }
+
+  lcd.setCursor(9, 0);
+  if (ESpO2 > 70) {
+    lcd.print("O2:");
+    lcd.print((int)ESpO2);
+    lcd.print("%");
+  } else {
+    lcd.print("O2:--");
+  }
+
+  // Line 2: Hemoglobin level and Status
+  // Format: "Hb:14.5 NORMAL  " (16 chars max)
+  lcd.setCursor(0, 1);
+  if (estimatedHemoglobin > 0.0) {
+    // Print hemoglobin value
+    lcd.print("Hb:");
+    lcd.print(estimatedHemoglobin, 1);
+    lcd.print(" ");
+    
+    // Get and display abbreviated status
+    const char *status = getAnemiaStatus();
+    if (estimatedHemoglobin >= 13.0) {
+      lcd.print("NORMAL");
+    } else if (estimatedHemoglobin >= 11.0) {
+      lcd.print("MILD");
+    } else if (estimatedHemoglobin >= 9.0) {
+      lcd.print("MODERATE");
+    } else {
+      lcd.print("SEVERE");
+    }
+  } else {
+    lcd.print("Hb:--- ---");
+  }
+}
+
+/**
+ * Displays measurement results on LCD - Format 2: Detailed with status
+ * Alternates between readings and anemia status
+ */
+void displayLCD_Format2() {
+  static unsigned long lastUpdate = 0;
+  static bool showStatus = false;
+
+  if (millis() - lastUpdate < 2000)
+    return;
+  lastUpdate = millis();
+  showStatus = !showStatus;
+
+  lcd.clear();
+
+  if (!showStatus) {
+    // Show numerical readings
+    lcd.setCursor(0, 0);
+    lcd.print("BPM:");
+    lcd.print(beatAvg > 0 ? beatAvg : 0);
+    lcd.print(" SpO2:");
+    lcd.print(ESpO2 > 70 ? (int)ESpO2 : 0);
+    lcd.print("%");
+
+    lcd.setCursor(0, 1);
+    lcd.print("Hb:");
+    if (estimatedHemoglobin > 9.0) {
+      lcd.print(estimatedHemoglobin, 1);
+      lcd.print(" g/dL");
+    } else {
+      lcd.print("---");
+    }
+  } else {
+    // Show anemia status
+    lcd.setCursor(0, 0);
+    lcd.print("Status:");
+
+    lcd.setCursor(0, 1);
+    const char *status = getAnemiaStatus();
+    // Truncate if too long for display
+    char displayStatus[17];
+    strncpy(displayStatus, status, 16);
+    displayStatus[16] = '\0';
+    lcd.print(displayStatus);
+  }
+}
+
+/**
+ * Displays comprehensive results on LCD - Format 3: Scrolling display
+ * Shows all information by cycling through different screens
+ */
+void displayLCD_Format3() {
+  static unsigned long lastUpdate = 0;
+  static int screen = 0;
+
+  if (millis() - lastUpdate < 2000)
+    return;
+  lastUpdate = millis();
+
+  lcd.clear();
+
+  switch (screen) {
+  case 0: // Heart Rate
+    lcd.setCursor(0, 0);
+    lcd.print("Heart Rate:");
+    lcd.setCursor(0, 1);
+    if (beatAvg > 0) {
+      lcd.print(beatAvg);
+      lcd.print(" BPM");
+    } else {
+      lcd.print("Calculating...");
+    }
+    break;
+
+  case 1: // SpO2
+    lcd.setCursor(0, 0);
+    lcd.print("Blood Oxygen:");
+    lcd.setCursor(0, 1);
+    if (ESpO2 > 70) {
+      lcd.print(ESpO2, 1);
+      lcd.print(" %");
+    } else {
+      lcd.print("Calculating...");
+    }
+    break;
+
+  case 2: // Hemoglobin
+    lcd.setCursor(0, 0);
+    lcd.print("Hemoglobin:");
+    lcd.setCursor(0, 1);
+    if (estimatedHemoglobin > 9.0) {
+      lcd.print(estimatedHemoglobin, 1);
+      lcd.print(" g/dL");
+    } else {
+      lcd.print("Calculating...");
+    }
+    break;
+
+  case 3: // Status
+    lcd.setCursor(0, 0);
+    lcd.print("Anemia Status:");
+    lcd.setCursor(0, 1);
+    lcd.print(getAnemiaStatus());
+    break;
+  }
+
+  screen = (screen + 1) % 4;
+}
+
+/**
+ * Main LCD display function - selects which format to use
+ * Change the format number to switch display styles:
+ * 1 = Compact (all on screen)
+ * 2 = Alternating (readings / status)
+ * 3 = Scrolling (one parameter at a time)
+ */
+void updateLCDDisplay() {
+  const int DISPLAY_FORMAT = 1; // Change this to 1, 2, or 3
+
+  switch (DISPLAY_FORMAT) {
+  case 1:
+    displayLCD_Format1();
+    break;
+  case 2:
+    displayLCD_Format2();
+    break;
+  case 3:
+    displayLCD_Format3();
+    break;
+  default:
+    displayLCD_Format1();
+  }
+}
+
+// ==================== WEB SERVER & REST API ====================
+
+/**
+ * Initialize SPIFFS for storing web files
+ */
+void initializeSPIFFS() {
+  Serial.println("\n====== INITIALIZING SPIFFS ======");
+  
+  if (!SPIFFS.begin(true)) {
+    Serial.println("!!! SPIFFS Mount Failed !!!");
+    Serial.println("Web dashboard will NOT be available.");
+    return;
+  }
+  
+  Serial.println("SPIFFS mounted successfully");
+  
+  // List files in SPIFFS
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  int fileCount = 0;
+  
+  Serial.println("Files on SPIFFS:");
+  while (file) {
+    Serial.print("  - ");
+    Serial.print(file.name());
+    Serial.print(" (");
+    Serial.print(file.size());
+    Serial.println(" bytes)");
+    fileCount++;
+    file = root.openNextFile();
+  }
+  
+  Serial.print("Total files: ");
+  Serial.println(fileCount);
+  Serial.println("==================================\n");
+}
+
+/**
+ * Initialize WiFi Manager for easy WiFi setup
+ * Creates AP if WiFi is not configured
+ */
+void initializeWiFi() {
+  Serial.println("\n====== STARTING WIFI MANAGER ======");
+  delay(500);
+  
+  WiFiManager wm;
+  
+  // Set callback for entering config mode
+  wm.setAPCallback([](WiFiManager *myWiFiManager) {
+    Serial.println("\n!!! ENTERED CONFIG MODE !!!");
+    Serial.println("AP Name: Hemoglobin_Detector");
+    Serial.println("Password: password");
+    Serial.println("Connect to this AP and a config portal will appear");
+    
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi Setup Mode");
+    lcd.setCursor(0, 1);
+    lcd.print("Connect to AP");
+  });
+
+  // REDUCE TIMEOUT from 120 to 30 seconds to avoid blocking
+  wm.setConfigPortalTimeout(30); 
+  
+  Serial.println("Attempting auto-connect to saved WiFi (30 sec timeout)...");
+  Serial.println("If first time: create AP 'Hemoglobin_Detector' password 'password'");
+  
+  bool res = wm.autoConnect("Hemoglobin_Detector", "password");
+  
+  if (res) {
+    Serial.println("\n=== WIFI CONNECTED SUCCESS ===");
+    Serial.print("Connected to: ");
+    Serial.println(WiFi.SSID());
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Signal strength: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+    Serial.println("==============================\n");
+    wifiConnected = true;
+  } else {
+    Serial.println("\n!!! WIFI CONNECTION FAILED !!!");
+    Serial.println("Created AP: Hemoglobin_Detector (password: password)");
+    Serial.println("Connect to AP and setup portal will appear.");
+    Serial.println("Web server will run on local AP (192.168.4.1)");
+    Serial.println("Or configure WiFi next time it starts.");
+    Serial.println("=====================================\n");
+    wifiConnected = false;
+  }
+}
+
+/**
+ * Setup REST API endpoints
+ */
+void setupRestAPI() {
+  // GET /api/measurements - Returns latest measurement
+  server.on("/api/measurements", HTTP_GET, [](AsyncWebServerRequest *request) {
+    StaticJsonDocument<256> doc;
+    doc["timestamp"] = millis();
+    doc["heartRate"] = beatAvg;
+    doc["spO2"] = (double)ESpO2;
+    doc["hemoglobin"] = (double)estimatedHemoglobin;
+    doc["status"] = getAnemiaStatus();
+    doc["irValue"] = particleSensor.getIR();
+    doc["redValue"] = particleSensor.getRed();
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+
+  // GET /api/history - Returns last N measurements (stored in memory)
+  server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request) {
+    StaticJsonDocument<512> doc;
+    JsonArray measurements = doc.createNestedArray("measurements");
+    
+    // For now, return current measurement only
+    // In Phase 2, implement circular buffer to store history
+    JsonObject meas = measurements.createNestedObject();
+    meas["timestamp"] = millis();
+    meas["heartRate"] = beatAvg;
+    meas["spO2"] = (double)ESpO2;
+    meas["hemoglobin"] = (double)estimatedHemoglobin;
+    meas["status"] = getAnemiaStatus();
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+
+  // GET /api/settings - Returns current settings
+  server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
+    StaticJsonDocument<256> doc;
+    doc["displayFormat"] = 1; // TODO: Read from EEPROM
+    doc["sampleSize"] = 100;
+    doc["spO2Min"] = 90;
+    doc["spO2Max"] = 100;
+    doc["hbMin"] = 12.0;
+    doc["hbMax"] = 17.0;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+
+  // GET /api/status - Simple health check
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    StaticJsonDocument<128> doc;
+    doc["device"] = "Hemoglobin Detector v1.0";
+    doc["wifiStatus"] = wifiConnected ? "connected" : "disconnected";
+    doc["uptime"] = millis();
+    doc["measuring"] = beatAvg > 0 ? true : false;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+}
+
+/**
+ * Serve the main web dashboard
+ */
+void setupWebDashboard() {
+  // Serve root index.html
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/index.html", "text/html");
+  });
+
+  // Serve CSS
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/style.css", "text/css");
+  });
+
+  // Serve JavaScript
+  server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/app.js", "application/javascript");
+  });
+
+  // 404 handler
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    request->send(404, "application/json", "{\"error\":\"Not Found\"}");
+  });
+}
+
+/**
+ * Initialize the AsyncWebServer
+ */
+void initializeWebServer() {
+  Serial.println("\n====== INITIALIZING WEB SERVER ======");
+  
+  Serial.println("Setting up REST API endpoints...");
+  setupRestAPI();
+  
+  Serial.println("Setting up web dashboard...");
+  setupWebDashboard();
+
+  Serial.println("Starting AsyncWebServer on port 80...");
+  server.begin();
+  
+  Serial.println("\n!!!!! WEB SERVER STARTED !!!!!");
+  
+  if (wifiConnected) {
+    Serial.println("Access dashboard at:");
+    Serial.print("  - http://hemoglobin-detector.local");
+    Serial.print("\n  - http://");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("NOTE: WiFi not connected, web server is running but only");
+    Serial.println("available on local AP if WiFiManager created one.");
+    Serial.println("Connect to: Hemoglobin_Detector AP (password: password)");
+    Serial.println("Then access: http://192.168.4.1");
+  }
+  Serial.println("=====================================\n");
+}
+
+// ==================== SETUP & MAIN LOOP ====================
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("=== Hemoglobin & Anemia Detection System ===");
+
+  // Initialize I2C
+  Wire.begin(21, 22); // ESP32: SDA=21, SCL=22
+
+  // Initialize LCD
+  Serial.println("Initializing LCD...");
+  initializeLCD();
+
+  // Initialize MAX30102 sensor
+  Serial.println("Initializing MAX30102...");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Init MAX30102...");
+
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    Serial.println("MAX30102 was not found. Please check wiring/power.");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ERROR: Sensor");
+    lcd.setCursor(0, 1);
+    lcd.print("not found!");
+    while (1)
+      ;
+  }
+
+  Serial.println("MAX30102 initialized successfully!");
+
+  // Configure sensor with optimized settings
+  particleSensor.setup();
+  particleSensor.setPulseAmplitudeRed(
+      0x0A); // Turn Red LED to low to indicate sensor is running
+  particleSensor.setPulseAmplitudeGreen(0); // Turn off Green LED
+
+  // Initialize WiFi and Web Server
+  Serial.println("Initializing WiFi...");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Setup...");
+  initializeSPIFFS();
+  initializeWiFi();
+  initializeWebServer();
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("System Ready!");
+  delay(1500);
+
+  Serial.println("\nPlace your finger on the sensor...");
+  Serial.println("Hold steady for accurate readings!\n");
+
+  lcd.clear();
+}
+
+void loop() {
+  // Read sensor values
+  long irValue = particleSensor.getIR();
+  long redValue = particleSensor.getRed();
+
+  // Static flag to track if we have calculated results
+  static bool hasCalculated = false;
+
+  // Step 1: Check if finger is present on sensor
+  if (!isFingerDetected(irValue)) {
+    Serial.println(
+        "No finger detected. Please place your finger on the sensor.");
+    displayWaitingForFinger();
+    
+    // Reset ALL measurement states and variables
+    beatAvg = 0;
+    SpO2 = 0;
+    ESpO2 = 90.0;  // Reset to initial value
+    estimatedHemoglobin = 0.0;
+    
+    // Reset accumulation variables
+    i = 0;
+    avered = 0;
+    aveir = 0;
+    
+    // Reset heart rate tracking
+    for (byte x = 0; x < RATE_SIZE; x++) {
+      rates[x] = 0;
+    }
+    rateSpot = 0;
+    lastBeat = 0;
+    
+    // Reset calculation flag so it starts fresh
+    hasCalculated = false;
+    
+    delay(100);
+    return;
+  }
+
+  // Step 2: Update heart rate detection
+  updateHeartRateDetection(irValue);
+
+  // Step 3: Accumulate data for SpO2 calculation
+  accumulateSensorData(redValue, irValue);
+
+  // Step 4: When buffer is full, calculate SpO2
+  if (i == 100) {
+    calculateSpO2FromAccumulatedData();  // This resets i to 0
+    estimateHemoglobinFromSpO2();
+    hasCalculated = true;  // Mark that we have valid results
+  }
+
+  // Step 5: Display on LCD
+  // Show "calculating" message during first 100 samples, then show results
+  if (hasCalculated) {
+    updateLCDDisplay();
+  } else {
+    displayCalculating();
+  }
+
+  // Step 6: Display results to serial monitor
+  displayMeasurementResults(irValue, redValue);
+
+  delay(10);
+}

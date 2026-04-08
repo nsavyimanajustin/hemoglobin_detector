@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Registration - Hemoglobin Detector</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .form-container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: var(--shadow);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-dark);
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--secondary-color);
+        }
+        .btn {
+            display: inline-block;
+            padding: 14px 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        .btn-secondary {
+            background: var(--light-bg);
+            color: var(--text-dark);
+            margin-top: 10px;
+        }
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            display: block;
+        }
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <h2>Hemoglobin System</h2>
+            <nav>
+                <a class="sidebar-link" href="/">Dashboard</a>
+                <a class="sidebar-link active" href="/register.html">Patient Register</a>
+                <a class="sidebar-link" href="/queue.html">Queue Status</a>
+            </nav>
+        </aside>
+
+        <div class="content-shell">
+            <div class="container">
+                <header>
+                    <h1>🩸 Patient Registration</h1>
+                    <div class="header-info">
+                        <span id="status" class="status-badge">Ready</span>
+                    </div>
+                </header>
+
+        <main>
+            <section class="share-panel">
+                <h2>Share this registration link</h2>
+                <p>Open this page on a phone or tablet. Use the share button below or copy the link and send it to anyone on the same Wi-Fi network.</p>
+                <div class="share-actions">
+                    <div id="shareLink" class="share-link" aria-label="Registration link"></div>
+                    <button type="button" class="share-button primary" id="shareButton">Share</button>
+                    <button type="button" class="share-button secondary" id="copyLinkButton">Copy link</button>
+                </div>
+                <div id="shareStatus" class="share-status"></div>
+            </section>
+
+            <div class="form-container">
+                <div id="message" class="message"></div>
+                
+                <form id="registrationForm">
+                    <div class="form-group">
+                        <label for="name">Full Name *</label>
+                        <input type="text" id="name" name="name" required placeholder="Enter your full name">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="phone">Phone Number *</label>
+                        <input type="tel" id="phone" name="phone" required placeholder="Enter phone number">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="age">Age</label>
+                        <input type="number" id="age" name="age" min="1" max="150" placeholder="Enter age">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="gender">Gender</label>
+                        <select id="gender" name="gender">
+                            <option value="other">Prefer not to say</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Register + Queue Patient</button>
+                </form>
+                
+            </div>
+        </main>
+
+                <footer>
+                    <p>Hemoglobin Detector v1.0 | Non-invasive Measurement System</p>
+                </footer>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:3000' : '';
+        const REGISTRATION_URL = window.location.href;
+
+        function setShareStatus(text) {
+            const statusEl = document.getElementById('shareStatus');
+            if (statusEl) {
+                statusEl.textContent = text;
+            }
+        }
+
+        function copyRegistrationLink() {
+            if (navigator.clipboard?.writeText) {
+                return navigator.clipboard.writeText(REGISTRATION_URL);
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = REGISTRATION_URL;
+            textarea.setAttribute('readonly', 'true');
+            textarea.style.position = 'absolute';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            return Promise.resolve();
+        }
+
+        async function shareRegistrationLink() {
+            try {
+                if (navigator.share) {
+                    await navigator.share({
+                        title: 'Hemoglobin Detector Registration',
+                        text: 'Open this registration page on your device',
+                        url: REGISTRATION_URL,
+                    });
+                    setShareStatus('Link shared successfully.');
+                    return;
+                }
+
+                await copyRegistrationLink();
+                setShareStatus('Link copied to clipboard.');
+            } catch (err) {
+                console.warn('Share failed:', err);
+                setShareStatus('Could not open the share sheet. Use Copy link instead.');
+            }
+        }
+
+        document.getElementById('shareLink').textContent = REGISTRATION_URL;
+        document.getElementById('shareButton').addEventListener('click', shareRegistrationLink);
+        document.getElementById('copyLinkButton').addEventListener('click', async () => {
+            try {
+                await copyRegistrationLink();
+                setShareStatus('Link copied to clipboard.');
+            } catch (err) {
+                console.warn('Copy failed:', err);
+                setShareStatus('Could not copy the link.');
+            }
+        });
+        
+        function showMessage(text, isError = false) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = 'message ' + (isError ? 'error' : 'success');
+        }
+        
+        document.getElementById('registrationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const params = new URLSearchParams();
+            for (const [key, value] of formData) {
+                params.append(key, value);
+            }
+            
+            try {
+                const response = await fetch(API_BASE + '/api/patients', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    const patientId = data.patientId;
+                    
+                    showMessage('Patient registered! Queuing for diagnosis...', false);
+                    
+                    // Wait a moment for serial output to show registration
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    const queueRes = await fetch(API_BASE + '/api/queue', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({ patientId: String(patientId) }).toString()
+                    });
+                    
+                    const queueData = await queueRes.json();
+                    if (queueData.success) {
+                        showMessage('✓ ' + data.message + ' - Queue Position: #' + queueData.position, false);
+                        
+                        // Broadcast to all dashboard pages via localStorage
+                        if (typeof(Storage) !== "undefined") {
+                            const event = {
+                                type: 'patient-queued',
+                                patientId: patientId,
+                                patientName: queueData.patientName || 'Unknown',
+                                position: queueData.position,
+                                timestamp: new Date().toISOString()
+                            };
+                            localStorage.setItem('hemoglobin-event', JSON.stringify(event));
+                        }
+                        
+                        e.target.reset();
+                        
+                        // Keep success message visible for 3 seconds
+                        setTimeout(() => {
+                            document.getElementById('message').style.display = 'none';
+                        }, 3000);
+                    } else {
+                        showMessage('Registered but failed to queue: ' + (queueData.error || 'Unknown error'), true);
+                    }
+                } else {
+                    showMessage(data.error || 'Registration failed', true);
+                }
+            } catch (err) {
+                showMessage('Error: ' + err.message, true);
+            }
+        });
+    </script>
+</body>
+</html>

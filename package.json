@@ -1,0 +1,33 @@
+{
+  "name": "hemoglobin_detector",
+  "version": "1.0.0",
+  "description": "## Project Overview This project implements a non-invasive hemoglobin and anemia detection system using optical sensing technology. The system measures blood oxygen levels (SpO2) and heart rate to estimate hemoglobin levels without requiring a blood sample.",
+  "main": "test-server.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "dev": "nodemon test-server.js",
+    "start": "node test-server.js",
+    "smoke": "node scripts/smoke-test.js",
+    "smoke:events": "node scripts/event-stream-smoke-test.js",
+    "lint": "eslint test-server.js scripts/*.js",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^2.2.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.0",
+    "eventsource": "^4.1.0",
+    "nodemon": "^3.1.14",
+    "prettier": "^3.8.1"
+  }
+}
