@@ -300,10 +300,10 @@
                     workflowNote.textContent = `Called patient: ${data.activePatientName}. Please place finger on sensor.`;
                     document.getElementById('currentPatient').textContent = data.activePatientName;
                     document.getElementById('positionDisplay').textContent = 'Diagnosis in progress';
+                } else if (data.queueCount > 0 && data.nextPatientName) {
+                    workflowNote.textContent = `Next patient to be called: ${data.nextPatientName}`;
                 } else {
-                    workflowNote.textContent = data.nextPatientName
-                        ? `Next patient to be called: ${data.nextPatientName}`
-                        : 'No patient in queue.';
+                    workflowNote.textContent = 'No patient in queue.';
                 }
             } catch (err) {
                 console.error('Error fetching workflow status:', err);
