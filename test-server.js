@@ -62,25 +62,44 @@ function sendLiveEvent(type, message, details = '') {
   }
 }
 
-// Compute LCD display lines based on current state
+function sendLcdUpdate() {
+  const lcd = getLcdState();
+  const payload = JSON.stringify({
+    type: 'lcd_update',
+    lcd,
+    timestamp: new Date().toISOString(),
+  });
+  for (const client of sseClients) {
+    client.write(`event: lcd_update\n`);
+    client.write(`data: ${payload}\n\n`);
+  }
+}
+
+// Compute LCD display lines based on current state (16x4)
 function getLcdState() {
   if (activePatientId) {
     return {
-      line1: `Patient: ${activePatientName.substring(0, 16)}`,
-      line2: 'Place finger now',
+      line1: 'Diagnosis Active',
+      line2: activePatientName.substring(0, 16),
+      line3: 'Place finger on ',
+      line4: 'sensor now...   ',
       state: 'diagnosis_active'
     };
   }
   if (queue.length > 0) {
     return {
-      line1: `Queue: ${queue.length} patient${queue.length > 1 ? 's' : ''}`,
-      line2: `Next: ${queue[0].patientName.substring(0, 11)}`,
+      line1: 'Queue: ' + queue.length + ' patient' + (queue.length > 1 ? 's' : '') + '  ',
+      line2: 'Next: ' + queue[0].patientName.substring(0, 10),
+      line3: 'Awaiting sensor ',
+      line4: 'placement...    ',
       state: 'queue_waiting'
     };
   }
   return {
-    line1: 'Hemoglobin Det.',
-    line2: 'Register patient',
+    line1: 'Hemoglobin Det. ',
+    line2: 'v1.0 Ready      ',
+    line3: 'Register patient',
+    line4: 'to begin scan   ',
     state: 'idle'
   };
 }
@@ -183,10 +202,10 @@ app.post('/api/queue', (req, res) => {
     activePatientId = queue[0].patientId;
     activePatientName = queue[0].patientName;
     logEvent('DIAGNOSIS_STARTED', `ID=${activePatientId}, Name=${activePatientName}`);
-    logEvent('LCD_UPDATE', `Line1=Patient: ${activePatientName} | Line2=Place finger now`);
+    logEvent('LCD_UPDATE', `[Diagnosis Active] [${activePatientName}] [Place finger on] [sensor now...]`);
     logEvent('SENSOR_ENABLE', `MAX30102 enabled for PatientId=${activePatientId}`);
     sendLiveEvent('diagnosis_started', `Call patient: ${activePatientName}`, `PatientId=${activePatientId}`);
-    sendLiveEvent('lcd_update', `Patient: ${activePatientName}`, 'Place finger now');
+    sendLcdUpdate();
     sendLiveEvent('sensor_enabled', `MAX30102 sensor enabled`, `PatientId=${activePatientId}`);
   }
 
@@ -227,10 +246,10 @@ app.post('/api/diagnosis/start', (req, res) => {
   activePatientId = target.patientId;
   activePatientName = target.patientName;
   logEvent('DIAGNOSIS_STARTED', `ID=${activePatientId}, Name=${activePatientName}`);
-  logEvent('LCD_UPDATE', `Line1=Patient: ${activePatientName} | Line2=Place finger now`);
+  logEvent('LCD_UPDATE', `[Diagnosis Active] [${activePatientName}] [Place finger on] [sensor now...]`);
   logEvent('SENSOR_ENABLE', `MAX30102 enabled for PatientId=${activePatientId}`);
   sendLiveEvent('diagnosis_started', `Call patient: ${activePatientName}`, `PatientId=${activePatientId}`);
-  sendLiveEvent('lcd_update', `Patient: ${activePatientName}`, 'Place finger now');
+  sendLcdUpdate();
   sendLiveEvent('sensor_enabled', `MAX30102 sensor enabled`, `PatientId=${activePatientId}`);
   res.json({ success: true, activePatientId, activePatientName, message: 'Place finger for diagnosis' });
 });
@@ -255,16 +274,16 @@ app.post('/api/diagnosis/complete', (req, res) => {
     activePatientId = queue[0].patientId;
     activePatientName = queue[0].patientName;
     logEvent('NEXT_PATIENT', `Auto-called: ID=${activePatientId}, Name=${activePatientName}`);
-    logEvent('LCD_UPDATE', `Line1=Patient: ${activePatientName} | Line2=Place finger now`);
+    logEvent('LCD_UPDATE', `[Diagnosis Active] [${activePatientName}] [Place finger on] [sensor now...]`);
     logEvent('SENSOR_ENABLE', `MAX30102 enabled for PatientId=${activePatientId}`);
     sendLiveEvent('next_patient_called', `Auto-called: ${queue[0].patientName}`, `PatientId=${queue[0].patientId}`);
-    sendLiveEvent('lcd_update', `Patient: ${activePatientName}`, 'Place finger now');
+    sendLcdUpdate();
     sendLiveEvent('sensor_enabled', `MAX30102 sensor enabled`, `PatientId=${activePatientId}`);
   } else {
-    logEvent('LCD_UPDATE', `Line1=Hemoglobin Det. | Line2=Queue empty`);
+    logEvent('LCD_UPDATE', `[Hemoglobin Det.] [v1.0 Ready] [Register patient] [to begin scan]`);
     logEvent('SENSOR_DISABLE', `MAX30102 disabled - no active patient`);
     sendLiveEvent('queue_empty', 'Queue is now empty', 'No active patient remains');
-    sendLiveEvent('lcd_update', 'Hemoglobin Det.', 'Queue empty');
+    sendLcdUpdate();
     sendLiveEvent('sensor_disabled', 'MAX30102 sensor disabled', 'No active patient');
   }
 

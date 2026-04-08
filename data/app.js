@@ -62,11 +62,22 @@ function clearSerialLog() {
 }
 
 // ── LCD Display ──────────────────────────────────────────────────────────────
-function updateLcd(line1, line2) {
-    const l1 = document.getElementById('lcd-line1');
-    const l2 = document.getElementById('lcd-line2');
-    if (l1) l1.innerHTML = escapeHtml(String(line1 || '').substring(0, 16)) + '<span class="lcd-cursor">_</span>';
-    if (l2) l2.textContent = String(line2 || '').substring(0, 16);
+function updateLcd(line1, line2, line3, line4) {
+    const set = (id, text, cursor) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const content = escapeHtml(String(text || '').padEnd(16).substring(0, 16));
+        el.innerHTML = content + (cursor ? '<span class="lcd-cursor">_</span>' : '');
+    };
+    set('lcd-line1', line1, true);
+    set('lcd-line2', line2, false);
+    set('lcd-line3', line3, false);
+    set('lcd-line4', line4, false);
+}
+
+function applyLcdState(lcd) {
+    if (!lcd) return;
+    updateLcd(lcd.line1, lcd.line2, lcd.line3, lcd.line4);
 }
 
 function updateSensorBadge(enabled) {
@@ -153,7 +164,8 @@ function startEventStream() {
         const handleLcdUpdate = (event) => {
             try {
                 const payload = JSON.parse(event.data);
-                updateLcd(payload.message, payload.details);
+                // New format: payload.lcd is the full 4-line state object
+                applyLcdState(payload.lcd);
             } catch (_) {}
         };
 
@@ -328,9 +340,7 @@ function updateDashboard(data) {
     updateSensorBadge(data.sensorEnabled || data.canMeasure);
 
     // Update LCD from measurement data (fallback if no SSE event)
-    if (data.lcd) {
-        updateLcd(data.lcd.line1, data.lcd.line2);
-    }
+    applyLcdState(data.lcd);
 }
 
 function updateGauges(data) {
@@ -448,7 +458,7 @@ async function fetchStatus() {
 
         // Update sensor & LCD from status if no recent SSE event
         updateSensorBadge(Boolean(data.sensorEnabled));
-        if (data.lcd) updateLcd(data.lcd.line1, data.lcd.line2);
+        applyLcdState(data.lcd);
     } catch (_) {}
 }
 
