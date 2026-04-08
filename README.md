@@ -235,18 +235,6 @@ npm install
 npm run dev
 ```
 
-## Public GitHub Readiness
-
-Before publishing the repository publicly:
-
-1. Keep generated files out of version control with [`.gitignore`](.gitignore).
-2. Commit the firmware, web dashboard, and documentation.
-3. Create a GitHub repository and push the project.
-4. Mark the repository public.
-5. Share the ESP32 dashboard link with users on the same network.
-
-For true public internet access, the ESP32 web server needs a public URL via a tunnel, reverse proxy, or separate hosted frontend.
-
 ## Usage Instructions
 
 1. **Power On:**
