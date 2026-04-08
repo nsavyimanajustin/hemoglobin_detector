@@ -3,7 +3,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 5000;
 const sseClients = new Set();
 
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -248,9 +248,9 @@ app.get('/api/settings', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Test server running at http://localhost:${PORT}`);
-  console.log(`- Dashboard: http://localhost:${PORT}/`);
-  console.log(`- Register: http://localhost:${PORT}/register.html`);
-  console.log(`- Queue: http://localhost:${PORT}/queue.html`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Test server running at http://0.0.0.0:${PORT}`);
+  console.log(`- Dashboard: http://0.0.0.0:${PORT}/`);
+  console.log(`- Register: http://0.0.0.0:${PORT}/register.html`);
+  console.log(`- Queue: http://0.0.0.0:${PORT}/queue.html`);
 });
