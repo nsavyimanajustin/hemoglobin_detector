@@ -8,6 +8,7 @@ const API_ROOT = window.location.search.includes('test=1') ? 'http://localhost:5
 const API_BASE = `${API_ROOT}/api`;
 const UPDATE_INTERVAL = 2000;
 const HISTORY_SIZE = 60;
+const RECENT_HISTORY_LIMIT = 5;
 
 // Global State
 let measurements = [];
@@ -20,6 +21,15 @@ let charts = {};
 let lastUptimeMs = 0;
 let lastUptimeFetchAt = 0;
 let lastStateVersion = 0;
+let espHardwareOnline = false;
+let currentQueueCount = 0;
+let currentNextPatientName = '';
+let currentNextPatientGender = '';
+let currentActivePatientName = '';
+let currentActivePatientGender = '';
+let currentCanMeasure = false;
+let recentHistory = [];
+let historyInterval = null;
 const USE_EVENT_STREAM = !window.location.search.includes('test=1') && typeof EventSource !== 'undefined';
 
 function escapeHtml(str) {
@@ -35,12 +45,16 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeCharts();
     startUpdating();
     fetchStatus();
+    fetchHistory();
     statusInterval = setInterval(fetchStatus, 10000);
+    historyInterval = setInterval(fetchHistory, 15000);
     updateUptime();
     setInterval(updateUptime, 1000);
     if (USE_EVENT_STREAM) {
         startEventStream();
     }
+
+    updateCallingTicker();
 
     // Cross-tab events from register page
     if (typeof Storage !== 'undefined') {
@@ -82,6 +96,9 @@ function startEventStream() {
                     fetchMeasurements();
                 }
                 fetchQueueStatus();
+                if (['measurement_complete', 'diagnosis_completed', 'next_patient_called', 'queue_empty'].includes(event.type)) {
+                    fetchHistory();
+                }
                 console.log('State event:', event.type, payload.message);
             } catch (_) {}
         };
@@ -150,6 +167,8 @@ function initializeCharts() {
                 labels: [],
                 datasets: [
                     { label: 'Heart Rate (BPM)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y' },
+                    { label: 'SpO2 (%)', data: [], borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y1' },
+                    { label: 'Hemoglobin (g/dL)', data: [], borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y2' },
                 ]
             },
             options: {
@@ -159,10 +178,66 @@ function initializeCharts() {
                 scales: {
                     y:  { type: 'linear', display: true, position: 'left', title: { display: true, text: 'BPM' }, min: 30, max: 150 },
                     y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'SpO2 (%)' }, min: 70, max: 100, grid: { drawOnChartArea: false } },
-                    y2: { type: 'linear', display: false, min: 8, max: 18 }
+                    y2: { type: 'linear', display: false, position: 'right', min: 8, max: 18 }
                 }
             }
         });
+    }
+}
+
+function inferHardwareOnline(state, bridge) {
+    if (bridge && typeof bridge.espOnline === 'boolean') {
+        return bridge.espOnline;
+    }
+
+    if (state && typeof state.source === 'string') {
+        if (state.source === 'esp32') return true;
+        if (state.source === 'fallback') return false;
+    }
+
+    return false;
+}
+
+function setHardwareOnlineState(online) {
+    espHardwareOnline = Boolean(online);
+    updateOnlineStatus(espHardwareOnline);
+}
+
+function formatPatientForCall(name, gender) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return 'patient';
+
+    if (/^(mr\.?|ms\.?|mrs\.?|dr\.?)\s+/i.test(trimmed)) {
+        return trimmed;
+    }
+
+    const g = String(gender || '').toLowerCase();
+    if (g === 'male') return `Mr ${trimmed}`;
+    if (g === 'female') return `Ms ${trimmed}`;
+    return trimmed;
+}
+
+function updateCallingTicker() {
+    const tickerEl = document.getElementById('callingTickerText');
+    if (!tickerEl) return;
+
+    let message = 'Waiting for patients in queue.';
+
+    if (!espHardwareOnline) {
+        message = 'Hardware is currently offline. Please wait while the ESP32 reconnects.';
+    } else if (currentCanMeasure && currentActivePatientName) {
+        message = `Now calling ${formatPatientForCall(currentActivePatientName, currentActivePatientGender)}. Please proceed to the diagnosis room.`;
+    } else if (currentNextPatientName) {
+        message = `Next in queue: ${formatPatientForCall(currentNextPatientName, currentNextPatientGender)}. Please prepare to proceed to the diagnosis room.`;
+    } else if (currentQueueCount > 0) {
+        message = `Queue update: ${currentQueueCount} patient(s) waiting. Next patient, please stand by.`;
+    }
+
+    if (tickerEl.textContent !== message) {
+        tickerEl.textContent = message;
+        tickerEl.style.animation = 'none';
+        void tickerEl.offsetWidth;
+        tickerEl.style.animation = '';
     }
 }
 
@@ -210,6 +285,13 @@ function applyStateSnapshot(state) {
         lastUptimeFetchAt = Date.now();
     }
 
+    currentQueueCount = Number(state.queueCount || 0);
+    currentNextPatientName = String(state.nextPatientName || '');
+    currentNextPatientGender = String(state.nextPatientGender || '').toLowerCase();
+    currentActivePatientName = String(state.activePatientName || '');
+    currentActivePatientGender = String(state.activePatientGender || '').toLowerCase();
+    currentCanMeasure = Boolean(state.canMeasure);
+
     updateDashboard(normalizeFromState(state));
 }
 
@@ -222,16 +304,16 @@ async function fetchStateSnapshot() {
     if (!data.success || !data.state) {
         throw new Error('invalid state response');
     }
-    return data.state;
+    return data;
 }
 
 async function fetchMeasurements() {
     try {
         try {
-            const state = await fetchStateSnapshot();
-            applyStateSnapshot(state);
+            const snapshot = await fetchStateSnapshot();
+            applyStateSnapshot(snapshot.state);
+            setHardwareOnlineState(inferHardwareOnline(snapshot.state, snapshot.bridge));
             isOnline = true;
-            updateOnlineStatus(true);
             return;
         } catch (_) {}
 
@@ -240,18 +322,19 @@ async function fetchMeasurements() {
         const data = await response.json();
         updateDashboard(normalizeMeasurement(data));
         isOnline = true;
-        updateOnlineStatus(true);
     } catch (error) {
         console.error('Error fetching measurements:', error);
         isOnline = false;
-        updateOnlineStatus(false);
+        setHardwareOnlineState(false);
     }
 }
 
 async function fetchQueueStatus() {
     try {
         try {
-            const state = await fetchStateSnapshot();
+            const snapshot = await fetchStateSnapshot();
+            const state = snapshot.state;
+            setHardwareOnlineState(inferHardwareOnline(state, snapshot.bridge));
             const event = new CustomEvent('queueUpdated', {
                 detail: {
                     queue: state.queue || [],
@@ -266,9 +349,150 @@ async function fetchQueueStatus() {
         const response = await fetch(`${API_BASE}/queue`);
         if (!response.ok) throw new Error('Network error');
         const data = await response.json();
+        currentQueueCount = Number(data.total || 0);
+        currentNextPatientName = String(data.nextPatient || '');
+        if (Array.isArray(data.queue) && data.queue[0]) {
+            currentNextPatientGender = String(data.queue[0].patientGender || data.queue[0].gender || '').toLowerCase();
+        }
+        updateCallingTicker();
         const event = new CustomEvent('queueUpdated', { detail: data });
         window.dispatchEvent(event);
     } catch (_) {}
+}
+
+function normalizeHistoryItem(item) {
+    return {
+        entryId: Number(item.entryId || 0),
+        patientId: String(item.patientId || ''),
+        patientName: String(item.patientName || ''),
+        gender: String(item.gender || '').toLowerCase(),
+        age: Number(item.age || 0),
+        heartRate: Number(item.heartRate || 0),
+        spO2: Number(item.spO2 || 0),
+        hemoglobin: Number(item.hemoglobin || 0),
+        status: String(item.status || 'UNKNOWN'),
+        recordedAt: Number(item.recordedAt || 0),
+    };
+}
+
+function trendBadgeClass(direction) {
+    if (direction === 'up') return 'up';
+    if (direction === 'down') return 'down';
+    return 'stable';
+}
+
+function trendArrow(direction) {
+    if (direction === 'up') return '↑';
+    if (direction === 'down') return '↓';
+    return '→';
+}
+
+function formatDelta(value, decimals) {
+    const num = Number(value || 0);
+    const fixed = num.toFixed(decimals);
+    return num > 0 ? `+${fixed}` : fixed;
+}
+
+function renderHistorySection(payload) {
+    const historyBody = document.getElementById('historyTableBody');
+    const historyEmpty = document.getElementById('historyEmpty');
+    const historyCountEl = document.getElementById('historyCount');
+    const historyTrendEl = document.getElementById('historyTrendSummary');
+    const historyAverageHbEl = document.getElementById('historyAverageHb');
+    const historyAverageSpo2El = document.getElementById('historyAverageSpo2');
+    const historyAverageHrEl = document.getElementById('historyAverageHr');
+    const historyLatestCountEl = document.getElementById('historyLatestCount');
+
+    if (!historyBody && !historyEmpty && !historyCountEl && !historyTrendEl && !historyAverageHbEl && !historyAverageSpo2El && !historyAverageHrEl && !historyLatestCountEl) {
+        return;
+    }
+
+    const history = Array.isArray(payload?.history) ? payload.history.map(normalizeHistoryItem) : [];
+    recentHistory = history;
+    const trend = payload?.trend || {};
+    const total = Number(payload?.total || history.length || 0);
+
+    if (historyCountEl) {
+        historyCountEl.textContent = `${total} saved result${total === 1 ? '' : 's'}`;
+    }
+
+    if (historyLatestCountEl) {
+        historyLatestCountEl.textContent = String(RECENT_HISTORY_LIMIT);
+    }
+
+    if (historyAverageHbEl) {
+        const hbAverage = Number(trend?.hemoglobin?.average || 0);
+        historyAverageHbEl.textContent = hbAverage > 0 ? `${hbAverage.toFixed(1)} g/dL` : '--';
+    }
+
+    if (historyAverageSpo2El) {
+        const spo2Average = Number(trend?.spO2?.average || 0);
+        historyAverageSpo2El.textContent = spo2Average > 0 ? `${spo2Average.toFixed(1)} %` : '--';
+    }
+
+    if (historyAverageHrEl) {
+        const hrAverage = Number(trend?.heartRate?.average || 0);
+        historyAverageHrEl.textContent = hrAverage > 0 ? `${hrAverage.toFixed(0)} BPM` : '--';
+    }
+
+    if (historyTrendEl) {
+        if (history.length > 0) {
+            const hbDir = String(trend?.hemoglobin?.direction || 'stable');
+            const spo2Dir = String(trend?.spO2?.direction || 'stable');
+            const hrDir = String(trend?.heartRate?.direction || 'stable');
+            historyTrendEl.innerHTML = [
+                `<span class="trend-pill ${trendBadgeClass(hbDir)}">Hb ${trendArrow(hbDir)} ${formatDelta(trend?.hemoglobin?.delta, 1)} g/dL</span>`,
+                `<span class="trend-pill ${trendBadgeClass(spo2Dir)}">SpO₂ ${trendArrow(spo2Dir)} ${formatDelta(trend?.spO2?.delta, 1)}%</span>`,
+                `<span class="trend-pill ${trendBadgeClass(hrDir)}">HR ${trendArrow(hrDir)} ${formatDelta(trend?.heartRate?.delta, 0)} BPM</span>`,
+            ].join(' ');
+        } else {
+            historyTrendEl.textContent = 'No saved results yet';
+        }
+    }
+
+    if (!historyBody) {
+        return;
+    }
+
+    if (history.length === 0) {
+        historyBody.innerHTML = '';
+        if (historyEmpty) historyEmpty.style.display = 'block';
+        return;
+    }
+
+    if (historyEmpty) historyEmpty.style.display = 'none';
+
+    historyBody.innerHTML = history.map((item, index) => {
+        const statusClass = String(item.status || '').toLowerCase();
+        const rowNumber = item.entryId || (history.length - index);
+        return `
+            <tr>
+                <td><strong>#${rowNumber}</strong></td>
+                <td>
+                    <span class="patient-name">${escapeHtml(item.patientName || 'Unknown')}</span>
+                    <span class="patient-meta">ID ${escapeHtml(item.patientId || '—')} · ${escapeHtml(item.gender || 'other')} · Age ${item.age || 0}</span>
+                </td>
+                <td>${item.heartRate > 0 ? item.heartRate : '--'}</td>
+                <td>${item.spO2 > 0 ? item.spO2.toFixed(1) : '--'}</td>
+                <td>${item.hemoglobin > 0 ? item.hemoglobin.toFixed(1) : '--'}</td>
+                <td><span class="history-badge ${statusClass}">${escapeHtml(item.status || 'UNKNOWN')}</span></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function fetchHistory() {
+    try {
+        const response = await fetch(`${API_BASE}/history?limit=${RECENT_HISTORY_LIMIT}`);
+        if (!response.ok) {
+            throw new Error('History unavailable');
+        }
+        const data = await response.json();
+        renderHistorySection(data);
+    } catch (error) {
+        console.warn('Error fetching history:', error);
+        renderHistorySection({ history: [], total: 0, trend: {} });
+    }
 }
 
 function normalizeMeasurement(data) {
@@ -320,6 +544,11 @@ function updateDashboard(data) {
     const workflowMsg = document.getElementById('workflow-message');
     if (activePatient) activePatient.textContent = data.activePatientName || 'None';
     if (workflowMsg) workflowMsg.textContent = data.workflowMessage || 'Waiting for queue';
+
+    currentActivePatientName = String(data.activePatientName || '');
+    currentActivePatientGender = String(data.activePatientGender || currentActivePatientGender || '').toLowerCase();
+    currentCanMeasure = Boolean(data.canMeasure);
+    updateCallingTicker();
 
 }
 
@@ -405,6 +634,8 @@ function updateOnlineStatus(online) {
         el.classList.add('offline');
         el.classList.remove('online');
     }
+
+    updateCallingTicker();
 }
 
 function updateUptime() {
@@ -423,14 +654,29 @@ function updateUptime() {
 async function fetchStatus() {
     try {
         try {
-            const state = await fetchStateSnapshot();
-            applyStateSnapshot(state);
+            const snapshot = await fetchStateSnapshot();
+            applyStateSnapshot(snapshot.state);
+            setHardwareOnlineState(inferHardwareOnline(snapshot.state, snapshot.bridge));
             return;
         } catch (_) {}
 
         const response = await fetch(`${API_BASE}/status`);
         if (!response.ok) return;
         const data = await response.json();
+
+        if (data.bridge && typeof data.bridge.espOnline === 'boolean') {
+            setHardwareOnlineState(data.bridge.espOnline);
+        } else if (typeof data.system === 'string') {
+            setHardwareOnlineState(data.system.toLowerCase() === 'online');
+        }
+
+        currentQueueCount = Number(data.queueCount || currentQueueCount || 0);
+        currentNextPatientName = String(data.nextPatientName || currentNextPatientName || '');
+        currentNextPatientGender = String(data.nextPatientGender || currentNextPatientGender || '').toLowerCase();
+        currentActivePatientName = String(data.activePatientName || currentActivePatientName || '');
+        currentActivePatientGender = String(data.activePatientGender || currentActivePatientGender || '').toLowerCase();
+        currentCanMeasure = Boolean(data.canMeasure);
+        updateCallingTicker();
 
         const uptimeMs = Number(data.uptime_ms ?? data.uptime ?? 0);
         if (Number.isFinite(uptimeMs) && uptimeMs > 0) {
@@ -456,4 +702,5 @@ function formatTime(date) {
 window.addEventListener('beforeunload', () => {
     if (updateInterval) clearInterval(updateInterval);
     if (statusInterval) clearInterval(statusInterval);
+    if (historyInterval) clearInterval(historyInterval);
 });

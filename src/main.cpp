@@ -230,7 +230,8 @@ void loop()
       {
         debug.info("Diagnosis cycle complete and queue advanced");
         measurementInProgress = false;
-        delay(1200);
+        // Keep results visible for 5 seconds before prompting the next patient.
+        delay(5000);
       }
 
       // Log every 5 seconds

@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
+const fs = require('fs');
 const { EventSource } = require('eventsource');
 
 const app = express();
@@ -12,10 +13,23 @@ const BRIDGE_ENABLED = process.env.ESP32_BRIDGE !== '0';
 const SERIAL_BRIDGE_ENABLED = process.env.ENABLE_SERIAL_BRIDGE !== '0';
 const SERIAL_PORT_PATH = process.env.SERIAL_PORT_PATH || '/dev/ttyUSB0';
 const SERIAL_BAUD_RATE = Number(process.env.SERIAL_BAUD_RATE || 115200);
+const HISTORY_FILE = path.join(__dirname, 'data', 'test-history.json');
+const HISTORY_LIMIT = 60;
+
+// Minimal local fallback state for startup/offline diagnostics.
+const patients = [];
+const queue = [];
+let nextPatientId = 1;
+let activePatientId = '';
+let activePatientName = '';
+let activePatientGender = '';
+let history = [];
+let nextHistoryId = 1;
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'data')));
+loadHistory();
 
 const sseClients = new Set();
 const SERIAL_LOG_SIZE = 300;
@@ -30,13 +44,6 @@ let serialPortInstance = null;
 let serialParser = null;
 let serialRetryTimer = null;
 let currentSerialPath = '';
-
-// Minimal local fallback state for startup/offline diagnostics.
-const patients = [];
-const queue = [];
-let nextPatientId = 1;
-let activePatientId = '';
-let activePatientName = '';
 
 function appendSerialLogLine(line, explicitTag = '') {
   const timestamp = new Date().toISOString();
@@ -95,6 +102,7 @@ function bumpState(reason) {
 function getLocalFallbackState() {
   const canMeasure = Boolean(activePatientId);
   const now = Date.now();
+  const nextInQueue = queue.length > 0 ? queue[0] : null;
   return {
     stateVersion,
     timestamp: new Date(now).toISOString(),
@@ -104,12 +112,14 @@ function getLocalFallbackState() {
     diagnosisActive: canMeasure,
     activePatientId,
     activePatientName,
+    activePatientGender,
     queueCount: queue.length,
-    nextPatientName: queue.length > 0 ? queue[0].patientName : null,
+    nextPatientName: nextInQueue ? nextInQueue.patientName : null,
+    nextPatientGender: nextInQueue ? (nextInQueue.patientGender || '') : '',
     sensorEnabled: canMeasure,
     lcd: {
       line1: canMeasure ? 'Diagnosis Active' : (queue.length > 0 ? `Queue: ${queue.length}` : 'Hemoglobin Det.'),
-      line2: canMeasure ? activePatientName : (queue[0]?.patientName || 'v1.0 Ready'),
+      line2: canMeasure ? activePatientName : (nextInQueue?.patientName || 'v1.0 Ready'),
       line3: canMeasure ? 'Place finger' : (queue.length > 0 ? 'Awaiting sensor' : 'Register patient'),
       line4: canMeasure ? 'on sensor now' : (queue.length > 0 ? 'placement' : 'to begin scan'),
     },
@@ -125,7 +135,7 @@ function getLocalFallbackState() {
     },
     workflowMessage: canMeasure
       ? `Diagnosing: ${activePatientName}`
-      : (queue.length > 0 ? `Waiting to call: ${queue[0].patientName}` : 'Register and queue a patient first'),
+      : (nextInQueue ? `Waiting to call: ${nextInQueue.patientName}` : 'Register and queue a patient first'),
     source: 'fallback',
   };
 }
@@ -155,6 +165,147 @@ function formBody(payload) {
   return new URLSearchParams(payload).toString();
 }
 
+function loadHistory() {
+  try {
+    if (!fs.existsSync(HISTORY_FILE)) {
+      history = [];
+      nextHistoryId = 1;
+      return;
+    }
+
+    const raw = fs.readFileSync(HISTORY_FILE, 'utf8');
+    const parsed = raw ? JSON.parse(raw) : {};
+    const records = Array.isArray(parsed.records) ? parsed.records : [];
+    history = records.slice(-HISTORY_LIMIT).map((item, index) => ({
+      entryId: Number(item.entryId || index + 1),
+      patientId: String(item.patientId || ''),
+      patientName: String(item.patientName || ''),
+      gender: String(item.gender || '').toLowerCase(),
+      age: Number(item.age || 0),
+      heartRate: Number(item.heartRate || 0),
+      spO2: Number(item.spO2 || 0),
+      hemoglobin: Number(item.hemoglobin || 0),
+      status: String(item.status || 'UNKNOWN'),
+      recordedAt: Number(item.recordedAt || 0),
+    }));
+    nextHistoryId = history.reduce((max, item) => Math.max(max, Number(item.entryId || 0)), 0) + 1;
+  } catch (error) {
+    history = [];
+    nextHistoryId = 1;
+    console.warn('Failed to load test history:', error.message);
+  }
+}
+
+function saveHistory() {
+  try {
+    const payload = {
+      version: 1,
+      nextHistoryId,
+      records: history,
+    };
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('Failed to save test history:', error.message);
+  }
+}
+
+function appendHistoryRecord(state) {
+  const measurements = state?.measurements || {};
+  if (!measurements.valid) return;
+
+  const record = {
+    entryId: nextHistoryId++,
+    patientId: String(state.activePatientId || ''),
+    patientName: String(state.activePatientName || 'Unknown'),
+    gender: String(state.activePatientGender || '').toLowerCase(),
+    age: 0,
+    heartRate: Number(measurements.heartRate || 0),
+    spO2: Number(measurements.spO2 || 0),
+    hemoglobin: Number(measurements.hemoglobin || 0),
+    status: String(measurements.status || 'UNKNOWN'),
+    recordedAt: Number(measurements.timestamp || Date.now()),
+  };
+
+  // Skip duplicate inserts when the same completion event is observed twice.
+  const previous = history[history.length - 1];
+  if (
+    previous
+    && String(previous.patientId || '') === record.patientId
+    && Number(previous.heartRate || 0) === record.heartRate
+    && Number(previous.spO2 || 0) === record.spO2
+    && Number(previous.hemoglobin || 0) === record.hemoglobin
+    && String(previous.status || '') === record.status
+  ) {
+    return;
+  }
+
+  history.push(record);
+  if (history.length > HISTORY_LIMIT) {
+    history = history.slice(-HISTORY_LIMIT);
+  }
+  saveHistory();
+}
+
+function buildHistoryTrend(entries) {
+  if (!entries.length) {
+    return {
+      summary: 'No saved results yet',
+      hemoglobin: { average: 0, delta: 0, direction: 'stable' },
+      spO2: { average: 0, delta: 0, direction: 'stable' },
+      heartRate: { average: 0, delta: 0, direction: 'stable' },
+      statusCounts: { normal: 0, mild: 0, moderate: 0, severe: 0 },
+    };
+  }
+
+  const first = entries[0];
+  const last = entries[entries.length - 1];
+  const sum = entries.reduce((acc, item) => {
+    acc.hb += Number(item.hemoglobin || 0);
+    acc.spo2 += Number(item.spO2 || 0);
+    acc.hr += Number(item.heartRate || 0);
+    const status = String(item.status || '').toUpperCase();
+    if (status === 'NORMAL') acc.normal += 1;
+    else if (status === 'MILD') acc.mild += 1;
+    else if (status === 'MODERATE') acc.moderate += 1;
+    else if (status === 'SEVERE') acc.severe += 1;
+    return acc;
+  }, { hb: 0, spo2: 0, hr: 0, normal: 0, mild: 0, moderate: 0, severe: 0 });
+
+  const hbDelta = Number(last.hemoglobin || 0) - Number(first.hemoglobin || 0);
+  const spo2Delta = Number(last.spO2 || 0) - Number(first.spO2 || 0);
+  const hrDelta = Number(last.heartRate || 0) - Number(first.heartRate || 0);
+
+  const direction = (delta, threshold) => {
+    if (delta > threshold) return 'up';
+    if (delta < -threshold) return 'down';
+    return 'stable';
+  };
+
+  return {
+    summary: `Hb ${direction(hbDelta, 0.2)}, SpO2 ${direction(spo2Delta, 0.5)}, HR ${direction(hrDelta, 2)}`,
+    hemoglobin: { average: sum.hb / entries.length, delta: hbDelta, direction: direction(hbDelta, 0.2) },
+    spO2: { average: sum.spo2 / entries.length, delta: spo2Delta, direction: direction(spo2Delta, 0.5) },
+    heartRate: { average: sum.hr / entries.length, delta: hrDelta, direction: direction(hrDelta, 2) },
+    statusCounts: {
+      normal: sum.normal,
+      mild: sum.mild,
+      moderate: sum.moderate,
+      severe: sum.severe,
+    },
+  };
+}
+
+function buildHistoryResponse(limit = 5) {
+  const clampedLimit = Math.max(1, Math.min(Number(limit || 5), HISTORY_LIMIT));
+  const recent = history.slice(-clampedLimit).reverse();
+  return {
+    total: history.length,
+    limit: clampedLimit,
+    history: recent,
+    trend: buildHistoryTrend(recent.slice().reverse()),
+  };
+}
+
 async function getBridgeState() {
   const [status, measurements, queueRes] = await Promise.all([
     espRequestJson('/api/status'),
@@ -162,9 +313,41 @@ async function getBridgeState() {
     espRequestJson('/api/queue'),
   ]);
 
+  let patientGenderById = new Map();
+  try {
+    const patientsRes = await espRequestJson('/api/patients');
+    const patientList = Array.isArray(patientsRes.patients) ? patientsRes.patients : [];
+    for (const p of patientList) {
+      const id = String(p.id ?? p.patientId ?? '');
+      if (!id) continue;
+      patientGenderById.set(id, String(p.gender || '').toLowerCase());
+    }
+  } catch (_) {
+    // Optional endpoint: proceed without gender enrichment.
+  }
+
   const now = Date.now();
   const canMeasure = Boolean(status.canMeasure || measurements.canMeasure);
-  const queueItems = Array.isArray(queueRes.queue) ? queueRes.queue : [];
+  const queueItemsRaw = Array.isArray(queueRes.queue) ? queueRes.queue : [];
+  const queueItems = queueItemsRaw.map((q) => {
+    const pid = String(q.patientId ?? q.id ?? '');
+    const genderFromQueue = String(q.patientGender || q.gender || '').toLowerCase();
+    const gender = genderFromQueue || patientGenderById.get(pid) || '';
+    return {
+      ...q,
+      patientId: pid || String(q.patientId || ''),
+      patientGender: gender,
+    };
+  });
+
+  const activeId = status.activePatientId || measurements.activePatientId || '';
+  const activeGender = String(
+    status.activePatientGender
+    || measurements.activePatientGender
+    || patientGenderById.get(String(activeId))
+    || ''
+  ).toLowerCase();
+  const nextPatient = queueItems.length > 0 ? queueItems[0] : null;
   return {
     stateVersion,
     timestamp: new Date(now).toISOString(),
@@ -172,10 +355,12 @@ async function getBridgeState() {
     workflowStage: canMeasure ? 'MEASURING' : (queueItems.length > 0 ? 'QUEUED' : 'IDLE'),
     canMeasure,
     diagnosisActive: Boolean(status.diagnosisActive || canMeasure),
-    activePatientId: status.activePatientId || measurements.activePatientId || '',
+    activePatientId: activeId,
     activePatientName: status.activePatientName || measurements.activePatientName || '',
+    activePatientGender: activeGender,
     queueCount: Number(status.queueCount ?? queueItems.length ?? 0),
-    nextPatientName: status.nextPatientName || queueRes.nextPatient || null,
+    nextPatientName: status.nextPatientName || queueRes.nextPatient || (nextPatient ? nextPatient.patientName : null),
+    nextPatientGender: nextPatient ? String(nextPatient.patientGender || '').toLowerCase() : '',
     sensorEnabled: Boolean(status.sensorEnabled ?? measurements.sensorEnabled ?? canMeasure),
     lcd: measurements.lcd || status.lcd || null,
     queue: queueItems,
@@ -298,10 +483,17 @@ async function executeLocalFallbackCommand(action, body) {
       throw new Error('Patient already queued');
     }
 
-    queue.push({ patientId, patientName: patient.name, queuedAt: Date.now(), position: queue.length + 1 });
+    queue.push({
+      patientId,
+      patientName: patient.name,
+      patientGender: String(patient.gender || '').toLowerCase(),
+      queuedAt: Date.now(),
+      position: queue.length + 1,
+    });
     if (!activePatientId) {
       activePatientId = patientId;
       activePatientName = patient.name;
+      activePatientGender = String(patient.gender || '').toLowerCase();
     }
     appendSerialLogLine(`PATIENT_QUEUED: ID=${patientId}, Name=${patient.name}`);
     return {};
@@ -311,6 +503,7 @@ async function executeLocalFallbackCommand(action, body) {
     if (!activePatientId && queue.length > 0) {
       activePatientId = queue[0].patientId;
       activePatientName = queue[0].patientName;
+      activePatientGender = String(queue[0].patientGender || '').toLowerCase();
     }
     return {};
   }
@@ -326,6 +519,7 @@ async function executeLocalFallbackCommand(action, body) {
       }
       activePatientId = queue[0]?.patientId || '';
       activePatientName = queue[0]?.patientName || '';
+      activePatientGender = String(queue[0]?.patientGender || '').toLowerCase();
     }
     return {};
   }
@@ -342,6 +536,7 @@ async function executeLocalFallbackCommand(action, body) {
     if (activePatientId === patientId) {
       activePatientId = '';
       activePatientName = '';
+      activePatientGender = '';
     }
     return {};
   }
@@ -612,7 +807,9 @@ app.post('/api/diagnosis/start', async (req, res) => {
 
 app.post('/api/diagnosis/complete', async (req, res) => {
   try {
+    const stateBeforeComplete = await getUnifiedState();
     await executeCommand('complete_diagnosis', req.body || {});
+    appendHistoryRecord(stateBeforeComplete);
     return res.json({ success: true, message: 'Diagnosis completed' });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message || 'Failed to complete diagnosis' });
@@ -653,6 +850,23 @@ app.get('/api/measurements', async (req, res) => {
   });
 });
 
+app.get('/api/history', async (req, res) => {
+  const limit = Math.max(1, Math.min(parseInt(req.query.limit || '5', 10), HISTORY_LIMIT));
+
+  if (BRIDGE_ENABLED) {
+    try {
+      // In bridge mode, source history from ESP32 so auto-completed diagnoses
+      // are reflected immediately without relying on local cache writes.
+      const bridgedHistory = await espRequestJson(`/api/history?limit=${limit}`);
+      return res.json(bridgedHistory);
+    } catch (error) {
+      appendSerialLogLine(`BRIDGE_HISTORY_FALLBACK: ${error.message}`, 'BRIDGE_WARN');
+    }
+  }
+
+  return res.json(buildHistoryResponse(limit));
+});
+
 app.get('/api/status', async (req, res) => {
   const state = await getUnifiedState();
   return res.json({
@@ -662,9 +876,11 @@ app.get('/api/status', async (req, res) => {
     canMeasure: Boolean(state.canMeasure),
     activePatientId: state.activePatientId || '',
     activePatientName: state.activePatientName || '',
+    activePatientGender: state.activePatientGender || '',
     diagnosisActive: Boolean(state.diagnosisActive),
     queueCount: state.queueCount || 0,
     nextPatientName: state.nextPatientName || null,
+    nextPatientGender: state.nextPatientGender || '',
     sensorEnabled: Boolean(state.sensorEnabled),
     workflowStage: state.workflowStage || 'IDLE',
     workflowMessage: state.workflowMessage || '',

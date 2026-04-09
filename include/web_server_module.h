@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
 #include "measurement_engine.h"
 #include "config.h"
 
@@ -31,6 +32,20 @@ struct QueueEntry
   int position;
 };
 
+struct HistoryEntry
+{
+  uint32_t entryId;
+  String patientId;
+  String patientName;
+  String gender;
+  int age;
+  int heartRate;
+  float spO2;
+  float hemoglobin;
+  String status;
+  unsigned long recordedAt;
+};
+
 class PatientManager
 {
 private:
@@ -45,6 +60,7 @@ public:
   Patient *getPatient(const String &id);
   int getPatientCount() { return patientCount; }
   Patient *listPatients(int *count);
+  const Patient *listPatients(int *count) const;
 
   int addToQueue(const String &patientId);
   QueueEntry *getQueue(int *count);
@@ -61,6 +77,9 @@ private:
   AsyncEventSource events{"/events"};
   MeasurementEngine *measurementEngine = nullptr;
   PatientManager patientManager;
+  HistoryEntry history[MEASUREMENT_HISTORY_SIZE];
+  int historyCount = 0;
+  uint32_t nextHistoryId = 1;
   bool running = false;
   bool wifiRequired = false;
   String activePatientId = "";
@@ -103,6 +122,13 @@ public:
 
   // Setup web dashboard
   void setupWebDashboard();
+
+  // Persistent history helpers
+  void loadHistory();
+  bool saveHistory();
+  void appendHistoryRecord(const String &patientId, const String &patientName, const String &gender, int age, const Measurement &measurement);
+  void appendHistoryRecord(const Patient *patient, const Measurement &measurement);
+  void writeHistoryResponse(JsonDocument &doc, int limit) const;
 
   // Broadcast workflow events to serial monitor and browser clients
   void publishEvent(const String &eventType, const String &message, const String &details = "");

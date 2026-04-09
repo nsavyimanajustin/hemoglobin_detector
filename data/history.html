@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History - Hemoglobin Detector</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-shell">
+        <button class="menu-toggle" id="menuToggle" aria-label="Open navigation menu">
+            <span></span><span></span><span></span>
+        </button>
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+        <aside class="sidebar" id="sidebar">
+            <h2>Hemoglobin System</h2>
+            <nav>
+                <a class="sidebar-link" href="/">Dashboard</a>
+                <a class="sidebar-link" href="/register.html">Patient Register</a>
+                <a class="sidebar-link" href="/queue.html">Queue Status</a>
+                <a class="sidebar-link active" href="/history.html">History</a>
+            </nav>
+        </aside>
+
+        <div class="content-shell">
+            <div class="container">
+                <header>
+                    <h1>📚 Patient History</h1>
+                    <div class="header-info">
+                        <span id="historyCount" class="status-badge">Loading...</span>
+                        <button class="refresh-btn" onclick="fetchHistory()">🔄 Refresh</button>
+                    </div>
+                </header>
+
+                <section class="history-section">
+                    <div class="section-heading">
+                        <h2>Saved Results</h2>
+                        <div class="history-actions">
+                            <span class="trend-pill" id="historyTrendSummary">Loading saved results…</span>
+                        </div>
+                    </div>
+
+                    <div class="history-summary-grid">
+                        <div class="history-summary-card">
+                            <span class="label">Average Hemoglobin</span>
+                            <div class="value" id="historyAverageHb">--</div>
+                            <div class="subtext">From the latest saved rows</div>
+                        </div>
+                        <div class="history-summary-card">
+                            <span class="label">Average SpO₂</span>
+                            <div class="value" id="historyAverageSpo2">--</div>
+                            <div class="subtext">Trend tuned from recent results</div>
+                        </div>
+                        <div class="history-summary-card">
+                            <span class="label">Average Heart Rate</span>
+                            <div class="value" id="historyAverageHr">--</div>
+                            <div class="subtext">Based on saved diagnoses</div>
+                        </div>
+                        <div class="history-summary-card">
+                            <span class="label">Rows Shown</span>
+                            <div class="value" id="historyLatestCount">5</div>
+                            <div class="subtext">Newest rows first</div>
+                        </div>
+                    </div>
+
+                    <div class="history-table-wrap">
+                        <div class="history-empty" id="historyEmpty" style="display:none;">
+                            <h3>No saved history yet</h3>
+                            <p>Completed diagnosis results will appear here and remain after ESP32 reboot.</p>
+                        </div>
+                        <table class="history-table" aria-label="Patient history table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Patient</th>
+                                    <th>Heart Rate</th>
+                                    <th>SpO₂</th>
+                                    <th>Hemoglobin</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_ROOT = window.location.search.includes('test=1') ? 'http://localhost:5000' : '';
+        const API_BASE = `${API_ROOT}/api`;
+        // Request all available rows; backend clamps to its max retention.
+        const HISTORY_LIMIT = 1000;
+        const USE_EVENT_STREAM = !window.location.search.includes('test=1') && typeof EventSource !== 'undefined';
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function trendBadgeClass(direction) {
+            if (direction === 'up') return 'up';
+            if (direction === 'down') return 'down';
+            return 'stable';
+        }
+
+        function trendArrow(direction) {
+            if (direction === 'up') return '↑';
+            if (direction === 'down') return '↓';
+            return '→';
+        }
+
+        function formatDelta(value, decimals) {
+            const num = Number(value || 0);
+            const fixed = num.toFixed(decimals);
+            return num > 0 ? `+${fixed}` : fixed;
+        }
+
+        function normalizeHistoryItem(item) {
+            return {
+                entryId: Number(item.entryId || 0),
+                patientId: String(item.patientId || ''),
+                patientName: String(item.patientName || ''),
+                gender: String(item.gender || '').toLowerCase(),
+                age: Number(item.age || 0),
+                heartRate: Number(item.heartRate || 0),
+                spO2: Number(item.spO2 || 0),
+                hemoglobin: Number(item.hemoglobin || 0),
+                status: String(item.status || 'UNKNOWN'),
+                recordedAt: Number(item.recordedAt || 0),
+            };
+        }
+
+        function renderHistory(payload) {
+            const history = Array.isArray(payload?.history) ? payload.history.map(normalizeHistoryItem) : [];
+            const trend = payload?.trend || {};
+            const total = Number(payload?.total || history.length || 0);
+
+            document.getElementById('historyCount').textContent = `${total} saved result${total === 1 ? '' : 's'}`;
+            document.getElementById('historyLatestCount').textContent = String(history.length);
+
+            const hbAverage = Number(trend?.hemoglobin?.average || 0);
+            const spo2Average = Number(trend?.spO2?.average || 0);
+            const hrAverage = Number(trend?.heartRate?.average || 0);
+
+            document.getElementById('historyAverageHb').textContent = hbAverage > 0 ? `${hbAverage.toFixed(1)} g/dL` : '--';
+            document.getElementById('historyAverageSpo2').textContent = spo2Average > 0 ? `${spo2Average.toFixed(1)} %` : '--';
+            document.getElementById('historyAverageHr').textContent = hrAverage > 0 ? `${hrAverage.toFixed(0)} BPM` : '--';
+
+            const trendEl = document.getElementById('historyTrendSummary');
+            if (history.length > 0) {
+                const hbDir = String(trend?.hemoglobin?.direction || 'stable');
+                const spo2Dir = String(trend?.spO2?.direction || 'stable');
+                const hrDir = String(trend?.heartRate?.direction || 'stable');
+                trendEl.innerHTML = [
+                    `<span class="trend-pill ${trendBadgeClass(hbDir)}">Hb ${trendArrow(hbDir)} ${formatDelta(trend?.hemoglobin?.delta, 1)} g/dL</span>`,
+                    `<span class="trend-pill ${trendBadgeClass(spo2Dir)}">SpO₂ ${trendArrow(spo2Dir)} ${formatDelta(trend?.spO2?.delta, 1)}%</span>`,
+                    `<span class="trend-pill ${trendBadgeClass(hrDir)}">HR ${trendArrow(hrDir)} ${formatDelta(trend?.heartRate?.delta, 0)} BPM</span>`,
+                ].join(' ');
+            } else {
+                trendEl.textContent = 'No saved results yet';
+            }
+
+            const historyEmpty = document.getElementById('historyEmpty');
+            const historyBody = document.getElementById('historyTableBody');
+            if (history.length === 0) {
+                historyBody.innerHTML = '';
+                historyEmpty.style.display = 'block';
+                return;
+            }
+
+            historyEmpty.style.display = 'none';
+            historyBody.innerHTML = history.map((item, index) => {
+                const statusClass = String(item.status || '').toLowerCase();
+                const rowNumber = item.entryId || (history.length - index);
+                return `
+                    <tr>
+                        <td><strong>#${rowNumber}</strong></td>
+                        <td>
+                            <span class="patient-name">${escapeHtml(item.patientName || 'Unknown')}</span>
+                            <span class="patient-meta">ID ${escapeHtml(item.patientId || '—')} · ${escapeHtml(item.gender || 'other')} · Age ${item.age || 0}</span>
+                        </td>
+                        <td>${item.heartRate > 0 ? item.heartRate : '--'}</td>
+                        <td>${item.spO2 > 0 ? item.spO2.toFixed(1) : '--'}</td>
+                        <td>${item.hemoglobin > 0 ? item.hemoglobin.toFixed(1) : '--'}</td>
+                        <td><span class="history-badge ${statusClass}">${escapeHtml(item.status || 'UNKNOWN')}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function fetchHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/history?limit=${HISTORY_LIMIT}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch history');
+                }
+                renderHistory(await response.json());
+            } catch (error) {
+                console.warn('History fetch failed:', error);
+                renderHistory({ history: [], total: 0, trend: {} });
+            }
+        }
+
+        function startEventStream() {
+            if (!USE_EVENT_STREAM) {
+                return;
+            }
+
+            const eventStream = new EventSource(`${API_ROOT}/events`);
+            const triggerRefresh = () => {
+                fetchHistory();
+            };
+
+            ['measurement_complete', 'diagnosis_completed', 'state_updated', 'state_snapshot']
+                .forEach((eventType) => {
+                    eventStream.addEventListener(eventType, triggerRefresh);
+                });
+
+            eventStream.onerror = () => {
+                // Keep polling fallback active below.
+            };
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchHistory();
+            startEventStream();
+            setInterval(fetchHistory, 15000);
+        });
+    </script>
+    <script src="sidebar.js"></script>
+</body>
+</html>

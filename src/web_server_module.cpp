@@ -4,6 +4,40 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 
+namespace
+{
+  constexpr const char *kHistoryFilePath = "/history.json";
+
+  const char *directionFromDelta(float delta, float threshold)
+  {
+    if (delta > threshold)
+      return "up";
+    if (delta < -threshold)
+      return "down";
+    return "stable";
+  }
+
+  String trendLabelFromDirection(const char *direction)
+  {
+    if (strcmp(direction, "up") == 0)
+      return "rising";
+    if (strcmp(direction, "down") == 0)
+      return "falling";
+    return "stable";
+  }
+
+  String statusFromHemoglobin(float hb)
+  {
+    if (hb >= NORMAL_HB_MIN)
+      return "NORMAL";
+    if (hb >= MILD_ANEMIA_HB_MIN)
+      return "MILD";
+    if (hb >= MODERATE_ANEMIA_HB_MIN)
+      return "MODERATE";
+    return "SEVERE";
+  }
+}
+
 static void logWorkflowEvent(const char *event, const String &details)
 {
   Serial.printf("[%lu ms] %s: %s\r\n", millis(), event, details.c_str());
@@ -62,6 +96,380 @@ void WebServerModule::publishEvent(const String &eventType, const String &messag
   events.send(payload.c_str(), eventType.c_str(), millis());
 }
 
+void WebServerModule::loadHistory()
+{
+  historyCount = 0;
+  nextHistoryId = 1;
+
+  if (!SPIFFS.exists(kHistoryFilePath))
+  {
+    debug.info("History file not found; starting empty history");
+    return;
+  }
+
+  File file = SPIFFS.open(kHistoryFilePath, FILE_READ);
+  if (!file)
+  {
+    debug.warn("Unable to open history file for reading");
+    return;
+  }
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+
+  if (error)
+  {
+    String warnMessage = String("Failed to parse history file: ") + error.c_str();
+    debug.warn(warnMessage.c_str());
+    return;
+  }
+
+  JsonArray records = doc["records"].as<JsonArray>();
+  uint32_t maxEntryId = 0;
+  if (!records.isNull())
+  {
+    for (JsonObject item : records)
+    {
+      if (historyCount >= MEASUREMENT_HISTORY_SIZE)
+      {
+        break;
+      }
+
+      HistoryEntry &entry = history[historyCount++];
+      entry.entryId = item["entryId"] | (historyCount);
+      entry.patientId = String((const char *)(item["patientId"] | ""));
+      entry.patientName = String((const char *)(item["patientName"] | ""));
+      entry.gender = String((const char *)(item["gender"] | ""));
+      entry.age = item["age"] | 0;
+      entry.heartRate = item["heartRate"] | 0;
+      entry.spO2 = item["spO2"] | 0.0;
+      entry.hemoglobin = item["hemoglobin"] | 0.0;
+      entry.status = String((const char *)(item["status"] | ""));
+      entry.recordedAt = item["recordedAt"] | 0;
+      if (entry.entryId > maxEntryId)
+      {
+        maxEntryId = entry.entryId;
+      }
+    }
+  }
+
+  nextHistoryId = maxEntryId + 1;
+  debug.log(DEBUG_INFO, "Loaded history entries", historyCount);
+}
+
+bool WebServerModule::saveHistory()
+{
+  JsonDocument doc;
+  doc["version"] = 1;
+  doc["nextHistoryId"] = nextHistoryId;
+  JsonArray records = doc["records"].to<JsonArray>();
+
+  for (int i = 0; i < historyCount; ++i)
+  {
+    JsonObject item = records.add<JsonObject>();
+    item["entryId"] = history[i].entryId;
+    item["patientId"] = history[i].patientId;
+    item["patientName"] = history[i].patientName;
+    item["gender"] = history[i].gender;
+    item["age"] = history[i].age;
+    item["heartRate"] = history[i].heartRate;
+    item["spO2"] = history[i].spO2;
+    item["hemoglobin"] = history[i].hemoglobin;
+    item["status"] = history[i].status;
+    item["recordedAt"] = history[i].recordedAt;
+  }
+
+  SPIFFS.remove(kHistoryFilePath);
+  File file = SPIFFS.open(kHistoryFilePath, FILE_WRITE);
+  if (!file)
+  {
+    debug.error("Unable to open history file for writing");
+    return false;
+  }
+
+  const size_t written = serializeJsonPretty(doc, file);
+  file.close();
+
+  if (written == 0)
+  {
+    debug.error("History file write failed");
+    return false;
+  }
+
+  debug.log(DEBUG_INFO, "History saved entries", historyCount);
+  return true;
+}
+
+void WebServerModule::appendHistoryRecord(const String &patientId, const String &patientName, const String &gender, int age, const Measurement &measurement)
+{
+  if (!measurement.isValid)
+  {
+    return;
+  }
+
+  if (historyCount >= MEASUREMENT_HISTORY_SIZE)
+  {
+    for (int i = 1; i < historyCount; ++i)
+    {
+      history[i - 1] = history[i];
+    }
+    historyCount = MEASUREMENT_HISTORY_SIZE - 1;
+  }
+
+  HistoryEntry &entry = history[historyCount++];
+  entry.entryId = nextHistoryId++;
+  entry.patientId = patientId;
+  entry.patientName = patientName;
+  entry.gender = gender;
+  entry.age = age;
+  entry.heartRate = measurement.heartRate;
+  entry.spO2 = measurement.spo2;
+  entry.hemoglobin = measurement.hemoglobin;
+  entry.status = measurement.status;
+  entry.recordedAt = measurement.timestamp;
+
+  saveHistory();
+}
+
+void WebServerModule::appendHistoryRecord(const Patient *patient, const Measurement &measurement)
+{
+  if (!patient)
+  {
+    appendHistoryRecord(activePatientId, activePatientName, "", 0, measurement);
+    return;
+  }
+
+  appendHistoryRecord(patient->id, patient->name, patient->gender, patient->age, measurement);
+}
+
+void WebServerModule::writeHistoryResponse(JsonDocument &doc, int limit) const
+{
+  const int clampedLimit = constrain(limit, 1, MEASUREMENT_HISTORY_SIZE);
+
+  if (historyCount <= 0)
+  {
+    int patientCount = 0;
+    const Patient *patients = patientManager.listPatients(&patientCount);
+
+    JsonArray historyArr = doc["history"].to<JsonArray>();
+    int emitted = 0;
+    for (int i = patientCount - 1; i >= 0 && emitted < clampedLimit; --i)
+    {
+      const bool hasResult =
+          patients[i].lastHemoglobin > 0.0f ||
+          patients[i].lastSpO2 > 0.0f ||
+          patients[i].heartRate > 0;
+      if (!hasResult)
+      {
+        continue;
+      }
+
+      JsonObject item = historyArr.add<JsonObject>();
+      item["entryId"] = patients[i].numericId;
+      item["patientId"] = patients[i].id;
+      item["patientName"] = patients[i].name;
+      item["gender"] = patients[i].gender;
+      item["age"] = patients[i].age;
+      item["heartRate"] = patients[i].heartRate;
+      item["spO2"] = patients[i].lastSpO2;
+      item["hemoglobin"] = patients[i].lastHemoglobin;
+      item["status"] = statusFromHemoglobin(patients[i].lastHemoglobin);
+      item["recordedAt"] = patients[i].registeredAt;
+      emitted++;
+    }
+
+    doc["total"] = emitted;
+    doc["limit"] = clampedLimit;
+
+    JsonObject trend = doc["trend"].to<JsonObject>();
+    if (emitted <= 0)
+    {
+      trend["summary"] = "No saved results yet";
+      JsonObject hb = trend["hemoglobin"].to<JsonObject>();
+      hb["average"] = 0;
+      hb["delta"] = 0;
+      hb["direction"] = "stable";
+
+      JsonObject spo2 = trend["spO2"].to<JsonObject>();
+      spo2["average"] = 0;
+      spo2["delta"] = 0;
+      spo2["direction"] = "stable";
+
+      JsonObject heartRate = trend["heartRate"].to<JsonObject>();
+      heartRate["average"] = 0;
+      heartRate["delta"] = 0;
+      heartRate["direction"] = "stable";
+      return;
+    }
+
+    float hbSum = 0.0f;
+    float spo2Sum = 0.0f;
+    float hrSum = 0.0f;
+    int normalCount = 0;
+    int mildCount = 0;
+    int moderateCount = 0;
+    int severeCount = 0;
+
+    float newestHb = historyArr[0]["hemoglobin"] | 0.0f;
+    float oldestHb = historyArr[emitted - 1]["hemoglobin"] | 0.0f;
+    float newestSpo2 = historyArr[0]["spO2"] | 0.0f;
+    float oldestSpo2 = historyArr[emitted - 1]["spO2"] | 0.0f;
+    float newestHr = historyArr[0]["heartRate"] | 0.0f;
+    float oldestHr = historyArr[emitted - 1]["heartRate"] | 0.0f;
+
+    for (int i = 0; i < emitted; ++i)
+    {
+      const float hb = historyArr[i]["hemoglobin"] | 0.0f;
+      const float spo2 = historyArr[i]["spO2"] | 0.0f;
+      const float hr = historyArr[i]["heartRate"] | 0.0f;
+      const String status = String((const char *)(historyArr[i]["status"] | ""));
+      hbSum += hb;
+      spo2Sum += spo2;
+      hrSum += hr;
+
+      if (status == "NORMAL")
+        ++normalCount;
+      else if (status == "MILD")
+        ++mildCount;
+      else if (status == "MODERATE")
+        ++moderateCount;
+      else if (status == "SEVERE")
+        ++severeCount;
+    }
+
+    const float hbDelta = newestHb - oldestHb;
+    const float spo2Delta = newestSpo2 - oldestSpo2;
+    const float hrDelta = newestHr - oldestHr;
+
+    JsonObject hb = trend["hemoglobin"].to<JsonObject>();
+    hb["average"] = hbSum / emitted;
+    hb["delta"] = hbDelta;
+    hb["direction"] = directionFromDelta(hbDelta, 0.2f);
+
+    JsonObject spo2 = trend["spO2"].to<JsonObject>();
+    spo2["average"] = spo2Sum / emitted;
+    spo2["delta"] = spo2Delta;
+    spo2["direction"] = directionFromDelta(spo2Delta, 0.5f);
+
+    JsonObject heartRate = trend["heartRate"].to<JsonObject>();
+    heartRate["average"] = hrSum / emitted;
+    heartRate["delta"] = hrDelta;
+    heartRate["direction"] = directionFromDelta(hrDelta, 2.0f);
+
+    JsonObject statusCounts = trend["statusCounts"].to<JsonObject>();
+    statusCounts["normal"] = normalCount;
+    statusCounts["mild"] = mildCount;
+    statusCounts["moderate"] = moderateCount;
+    statusCounts["severe"] = severeCount;
+
+    trend["summary"] = String("Hb ") + trendLabelFromDirection(hb["direction"] | "stable") +
+                       ", SpO2 " + trendLabelFromDirection(spo2["direction"] | "stable") +
+                       ", HR " + trendLabelFromDirection(heartRate["direction"] | "stable");
+    return;
+  }
+
+  const int count = min(historyCount, clampedLimit);
+
+  doc["total"] = historyCount;
+  doc["limit"] = clampedLimit;
+
+  JsonArray historyArr = doc["history"].to<JsonArray>();
+  for (int i = historyCount - 1; i >= 0 && historyArr.size() < (size_t)count; --i)
+  {
+    const HistoryEntry &entry = history[i];
+    JsonObject item = historyArr.add<JsonObject>();
+    item["entryId"] = entry.entryId;
+    item["patientId"] = entry.patientId;
+    item["patientName"] = entry.patientName;
+    item["gender"] = entry.gender;
+    item["age"] = entry.age;
+    item["heartRate"] = entry.heartRate;
+    item["spO2"] = entry.spO2;
+    item["hemoglobin"] = entry.hemoglobin;
+    item["status"] = entry.status;
+    item["recordedAt"] = entry.recordedAt;
+  }
+
+  JsonObject trend = doc["trend"].to<JsonObject>();
+  if (count <= 0)
+  {
+    trend["summary"] = "No saved results yet";
+    JsonObject hb = trend["hemoglobin"].to<JsonObject>();
+    hb["average"] = 0;
+    hb["delta"] = 0;
+    hb["direction"] = "stable";
+
+    JsonObject spo2 = trend["spO2"].to<JsonObject>();
+    spo2["average"] = 0;
+    spo2["delta"] = 0;
+    spo2["direction"] = "stable";
+
+    JsonObject heartRate = trend["heartRate"].to<JsonObject>();
+    heartRate["average"] = 0;
+    heartRate["delta"] = 0;
+    heartRate["direction"] = "stable";
+    return;
+  }
+
+  const int firstIndex = historyCount - count;
+  const HistoryEntry &first = history[firstIndex];
+  const HistoryEntry &last = history[historyCount - 1];
+
+  float hbSum = 0.0f;
+  float spo2Sum = 0.0f;
+  float hrSum = 0.0f;
+  int normalCount = 0;
+  int mildCount = 0;
+  int moderateCount = 0;
+  int severeCount = 0;
+
+  for (int i = firstIndex; i < historyCount; ++i)
+  {
+    hbSum += history[i].hemoglobin;
+    spo2Sum += history[i].spO2;
+    hrSum += history[i].heartRate;
+
+    if (history[i].status == "NORMAL")
+      ++normalCount;
+    else if (history[i].status == "MILD")
+      ++mildCount;
+    else if (history[i].status == "MODERATE")
+      ++moderateCount;
+    else if (history[i].status == "SEVERE")
+      ++severeCount;
+  }
+
+  const float hbDelta = last.hemoglobin - first.hemoglobin;
+  const float spo2Delta = last.spO2 - first.spO2;
+  const float hrDelta = float(last.heartRate - first.heartRate);
+
+  JsonObject hb = trend["hemoglobin"].to<JsonObject>();
+  hb["average"] = hbSum / count;
+  hb["delta"] = hbDelta;
+  hb["direction"] = directionFromDelta(hbDelta, 0.2f);
+
+  JsonObject spo2 = trend["spO2"].to<JsonObject>();
+  spo2["average"] = spo2Sum / count;
+  spo2["delta"] = spo2Delta;
+  spo2["direction"] = directionFromDelta(spo2Delta, 0.5f);
+
+  JsonObject heartRate = trend["heartRate"].to<JsonObject>();
+  heartRate["average"] = hrSum / count;
+  heartRate["delta"] = hrDelta;
+  heartRate["direction"] = directionFromDelta(hrDelta, 2.0f);
+
+  JsonObject statusCounts = trend["statusCounts"].to<JsonObject>();
+  statusCounts["normal"] = normalCount;
+  statusCounts["mild"] = mildCount;
+  statusCounts["moderate"] = moderateCount;
+  statusCounts["severe"] = severeCount;
+
+  trend["summary"] = String("Hb ") + trendLabelFromDirection(hb["direction"] | "stable") +
+                     ", SpO2 " + trendLabelFromDirection(spo2["direction"] | "stable") +
+                     ", HR " + trendLabelFromDirection(heartRate["direction"] | "stable");
+}
+
 int PatientManager::addPatient(const String &name, const String &phone, const String &gender, int age)
 {
   if (patientCount >= MAX_PATIENTS)
@@ -115,6 +523,12 @@ Patient *PatientManager::getPatient(const String &id)
 }
 
 Patient *PatientManager::listPatients(int *count)
+{
+  *count = patientCount;
+  return patients;
+}
+
+const Patient *PatientManager::listPatients(int *count) const
 {
   *count = patientCount;
   return patients;
@@ -217,6 +631,8 @@ bool WebServerModule::begin(MeasurementEngine *engine, bool requireWiFi)
   }
 
   debug.info("SPIFFS mounted successfully");
+
+  loadHistory();
 
   // List files on SPIFFS
   File root = SPIFFS.open("/");
@@ -385,6 +801,20 @@ void WebServerModule::setupRestAPI()
     doc["moderate_anemia_hb_min"] = MODERATE_ANEMIA_HB_MIN;
     doc["normal_spo2_min"] = NORMAL_SPO2_MIN;
     
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
+
+  server.on("/api/history", HTTP_GET, [this](AsyncWebServerRequest *request)
+            {
+    int limit = 5;
+    if (request->hasParam("limit")) {
+      limit = request->getParam("limit")->value().toInt();
+    }
+
+    JsonDocument doc;
+    writeHistoryResponse(doc, limit);
+
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response); });
@@ -675,7 +1105,9 @@ bool WebServerModule::completeDiagnosis(bool autoStartNext)
 
   if (m.isValid)
   {
+    Patient *patient = patientManager.getPatient(activePatientId);
     patientManager.updateMeasurement(activePatientId, m.hemoglobin, m.spo2, m.heartRate);
+    appendHistoryRecord(patient, m);
     debug.log(DEBUG_INFO, "Heart Rate (BPM)", m.heartRate);
     debug.log(DEBUG_INFO, "SpO2 (%)", (int)m.spo2);
     debug.log(DEBUG_INFO, "Hemoglobin (g/dL)", m.hemoglobin);

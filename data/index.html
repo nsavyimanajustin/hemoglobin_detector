@@ -26,6 +26,7 @@
                 <a class="sidebar-link active" href="/">Dashboard</a>
                 <a class="sidebar-link" href="/register.html">Patient Register</a>
                 <a class="sidebar-link" href="/queue.html">Queue Status</a>
+                <a class="sidebar-link" href="/history.html">History</a>
             </nav>
         </aside>
 
@@ -38,6 +39,13 @@
                         <span id="uptime" class="uptime">Uptime: --:--:--</span>
                     </div>
                 </header>
+
+                <section class="calling-ticker" aria-live="polite" aria-label="Patient call announcements">
+                    <div class="calling-ticker-label">Now Calling</div>
+                    <div class="calling-ticker-window">
+                        <div id="callingTickerText" class="calling-ticker-text">Waiting for patients in queue.</div>
+                    </div>
+                </section>
 
         <main>
             <!-- Measurement Section -->
@@ -98,6 +106,60 @@
                 <h2>Measurement Trends</h2>
                 <div class="chart-container">
                     <canvas id="trendChart"></canvas>
+                </div>
+            </section>
+
+            <!-- Recent History Section -->
+            <section class="history-section">
+                <div class="section-heading">
+                    <h2>Recent Patient History</h2>
+                    <div class="history-actions">
+                        <span class="trend-pill" id="historyCount">0 saved results</span>
+                        <span class="trend-pill" id="historyTrendSummary">No saved results yet</span>
+                    </div>
+                </div>
+
+                <div class="history-summary-grid">
+                    <div class="history-summary-card">
+                        <span class="label">Average Hemoglobin</span>
+                        <div class="value" id="historyAverageHb">--</div>
+                        <div class="subtext">Recent saved results</div>
+                    </div>
+                    <div class="history-summary-card">
+                        <span class="label">Average SpO₂</span>
+                        <div class="value" id="historyAverageSpo2">--</div>
+                        <div class="subtext">Trend tuned from last five rows</div>
+                    </div>
+                    <div class="history-summary-card">
+                        <span class="label">Average Heart Rate</span>
+                        <div class="value" id="historyAverageHr">--</div>
+                        <div class="subtext">Historical patient results</div>
+                    </div>
+                    <div class="history-summary-card">
+                        <span class="label">Latest Saved Rows</span>
+                        <div class="value" id="historyLatestCount">5</div>
+                        <div class="subtext">Shown below</div>
+                    </div>
+                </div>
+
+                <div class="history-table-wrap">
+                    <div class="history-empty" id="historyEmpty" style="display: none;">
+                        <h3>No saved history yet</h3>
+                        <p>Completed diagnosis results will appear here and remain available after reboot.</p>
+                    </div>
+                    <table class="history-table" aria-label="Recent saved patient results">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Patient</th>
+                                <th>Heart Rate</th>
+                                <th>SpO₂</th>
+                                <th>Hemoglobin</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody"></tbody>
+                    </table>
                 </div>
             </section>
         </main>
