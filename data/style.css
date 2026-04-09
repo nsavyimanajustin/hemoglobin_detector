@@ -518,7 +518,7 @@ footer p { margin: 5px 0; }
 /* ── Responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
     .container {
-        padding: 14px 14px 14px 68px;
+        padding: 14px;
     }
 
     header {
@@ -559,7 +559,131 @@ footer p { margin: 5px 0; }
 }
 
 @media (max-width: 380px) {
-    .container { padding-left: 62px; }
+    .container { padding: 14px; }
     header h1  { font-size: 1.3em; }
     .details-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Mobile-First Touch Improvements ──────────────────────────────────── */
+@media (hover: none) and (pointer: coarse) {
+    /* Mobile devices - larger touch targets */
+    button,
+    input[type="submit"],
+    input[type="button"],
+    a.btn,
+    .btn {
+        min-height: 48px;
+        min-width: 48px;
+        font-size: 16px; /* Prevent iOS zoom */
+    }
+
+    input[type="text"],
+    input[type="tel"],
+    input[type="email"],
+    input[type="number"],
+    select,
+    textarea {
+        font-size: 16px; /* Prevent iOS zoom on focus */
+        padding: 16px 12px;
+    }
+
+    .btn {
+        padding: 16px 20px;
+    }
+
+    /* Better spacing for touch */
+    .queue-item {
+        min-height: 56px;
+        padding: 12px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    /* Improve form readability */
+    .form-group label {
+        font-size: 1.05em;
+    }
+}
+
+/* ── Specific Mobile Optimizations ────────────────────────────────────── */
+@media (max-width: 767px) {
+    /* Full width forms better on mobile */
+    .form-container {
+        max-width: 100%;
+        border-radius: 0;
+        padding: 16px 12px;
+    }
+
+    /* Better button layout on mobile */
+    .confirmation-buttons {
+        flex-direction: column;
+    }
+
+    .confirmation-buttons button {
+        width: 100%;
+        min-width: auto;
+    }
+
+    /* Improve text readability */
+    body {
+        font-size: 16px; /* Helps with mobile usability */
+    }
+
+    header {
+        padding: 16px 12px;
+    }
+
+    main {
+        padding: 16px 0;
+    }
+
+    /* Better spacing in small screens */
+    section {
+        margin-bottom: 20px;
+    }
+
+    .now-serving {
+        margin-bottom: 20px;
+        padding: 24px 16px;
+    }
+
+    .queue-list {
+        padding: 12px;
+    }
+
+    .queue-item {
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .queue-item .name {
+        min-width: 120px;
+    }
+
+    /* Improve navigation on small screens */
+    .sidebar {
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Prevent horizontal scroll */
+    body, html {
+        overflow-x: hidden;
+    }
+}
+
+/* ── Landscape Mode ───────────────────────────────────────────────────── */
+@media (max-height: 500px) and (orientation: landscape) {
+    header {
+        padding: 12px 16px;
+    }
+
+    .queue-number {
+        font-size: 2.5em;
+    }
+
+    main {
+        padding: 8px 0;
+    }
 }

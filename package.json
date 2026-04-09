@@ -12,6 +12,7 @@
     "start": "node test-server.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:events": "node scripts/event-stream-smoke-test.js",
+    "smoke:state": "node scripts/state-contract-smoke-test.js",
     "lint": "eslint test-server.js scripts/*.js",
     "format": "prettier --check .",
     "format:fix": "prettier --write ."
@@ -20,8 +21,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@serialport/parser-readline": "^13.0.0",
     "body-parser": "^2.2.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "serialport": "^13.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

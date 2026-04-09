@@ -2,44 +2,80 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Patient Registration - Hemoglobin Detector</title>
     <link rel="stylesheet" href="style.css">
     <style>
+        /* Mobile Form Container */
         .form-container {
-            max-width: 500px;
-            margin: 0 auto;
+            max-width: 100%;
+            padding: 20px;
             background: var(--card-bg);
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: var(--shadow);
+            border-radius: 0 0 15px 15px;
         }
+
+        @media (min-width: 768px) {
+            .form-container {
+                max-width: 500px;
+                margin: 0 auto;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: var(--shadow);
+            }
+        }
+
+        /* Mobile-optimized form */
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
+            display: flex;
+            flex-direction: column;
         }
+
         .form-group label {
             display: block;
             margin-bottom: 8px;
             font-weight: 600;
             color: var(--text-dark);
+            font-size: 1em;
         }
+
         .form-group input,
         .form-group select {
             width: 100%;
-            padding: 12px;
+            padding: 16px 12px;
             border: 2px solid var(--border-color);
             border-radius: 8px;
-            font-size: 1em;
-            transition: border-color 0.2s;
+            font-size: 16px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+            background-color: #fff;
         }
+
+        /* Prevent iOS zoom on input focus */
+        @media (max-width: 767px) {
+            .form-group input,
+            .form-group select {
+                font-size: 16px;
+            }
+        }
+
         .form-group input:focus,
         .form-group select:focus {
             outline: none;
             border-color: var(--secondary-color);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
+
+        .form-group input::placeholder {
+            color: #999;
+            font-size: 0.95em;
+        }
+
+        /* Mobile-optimized buttons */
         .btn {
             display: inline-block;
-            padding: 14px 30px;
+            padding: 16px 20px;
             font-size: 1.1em;
             font-weight: 600;
             border: none;
@@ -48,35 +84,162 @@
             transition: transform 0.2s, box-shadow 0.2s;
             width: 100%;
             margin-top: 10px;
+            min-height: 48px;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
         }
+
         .btn-primary {
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
             color: white;
         }
+
+        .btn-primary:active,
         .btn-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
         }
+
         .btn-secondary {
             background: var(--light-bg);
             color: var(--text-dark);
+            border: 2px solid var(--border-color);
             margin-top: 10px;
         }
+
         .message {
-            padding: 15px;
+            padding: 16px;
             border-radius: 8px;
             margin-bottom: 20px;
             display: none;
+            font-weight: 500;
+            text-align: center;
         }
+
         .message.success {
             background-color: #d4edda;
             color: #155724;
             display: block;
+            border: 1px solid #c3e6cb;
         }
+
         .message.error {
             background-color: #f8d7da;
             color: #721c24;
             display: block;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* Confirmation view */
+        .confirmation-container {
+            display: none;
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+            border-radius: 15px;
+            margin: 20px 0;
+        }
+
+        .confirmation-container.show {
+            display: block;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .confirmation-container h2 {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+            color: white;
+        }
+
+        .queue-position {
+            font-size: 3.5em;
+            font-weight: 800;
+            margin: 20px 0;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .patient-name-display {
+            font-size: 1.3em;
+            opacity: 0.95;
+            margin: 15px 0;
+        }
+
+        .confirmation-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .confirmation-buttons button {
+            flex: 1;
+            min-width: 120px;
+            padding: 14px;
+            font-size: 1em;
+            font-weight: 600;
+            border: 2px solid white;
+            border-radius: 8px;
+            background: transparent;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .confirmation-buttons button:hover {
+            background: white;
+            color: #27ae60;
+        }
+
+        .confirmation-buttons button:active {
+            transform: scale(0.95);
+        }
+
+        /* Hide form when confirmed */
+        .registering .form-container,
+        .registering .share-panel {
+            display: none;
+        }
+
+        .registering .confirmation-container {
+            display: block;
+        }
+
+        /* Share panel */
+        .share-panel {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f0f4ff;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .share-panel.show {
+            display: block;
+        }
+
+        @media (max-width: 480px) {
+            .form-container {
+                padding: 16px 12px;
+            }
+
+            header h1 {
+                font-size: 1.6em;
+            }
+
+            .confirmation-container {
+                padding: 30px 16px;
+            }
+
+            .queue-position {
+                font-size: 3em;
+            }
         }
     </style>
 </head>
@@ -105,38 +268,53 @@
                 </header>
 
         <main>
-            <section class="share-panel">
-                <h2>Share this registration link</h2>
-                <p>Open this page on a phone or tablet. Use the share button below or copy the link and send it to anyone on the same Wi-Fi network.</p>
-                <div class="share-actions">
-                    <div id="shareLink" class="share-link" aria-label="Registration link"></div>
-                    <button type="button" class="share-button primary" id="shareButton">Share</button>
-                    <button type="button" class="share-button secondary" id="copyLinkButton">Copy link</button>
+            <!-- Share panel for desktop/setup -->
+            <section class="share-panel show" id="sharePanel">
+                <h2>📱 Share this registration link</h2>
+                <p style="font-size: 0.95em; margin-bottom: 15px;">Send this link to patients so they can register on their phones.</p>
+                <div class="share-actions" style="display: flex; flex-direction: column; gap: 10px;">
+                    <div id="shareLink" class="share-link" style="background: #f5f5f5; padding: 12px; border-radius: 6px; font-size: 0.9em; word-break: break-all; margin-bottom: 10px;"></div>
+                    <button type="button" class="share-button primary" id="shareButton" style="padding: 12px; background: #3498db; color: white; border: none; border-radius: 6px; cursor: pointer;">📤 Share Link</button>
+                    <button type="button" class="share-button secondary" id="copyLinkButton" style="padding: 12px; background: white; color: #3498db; border: 2px solid #3498db; border-radius: 6px; cursor: pointer;">📋 Copy Link</button>
                 </div>
-                <div id="shareStatus" class="share-status"></div>
+                <div id="shareStatus" class="share-status" style="margin-top: 10px; font-size: 0.9em; color: #666;"></div>
             </section>
 
-            <div class="form-container">
+            <!-- Confirmation container (hidden until registered) -->
+            <div class="confirmation-container" id="confirmationContainer">
+                <h2>✅ Registration Successful!</h2>
+                <p style="opacity: 0.9; margin-bottom: 10px;">Your position in queue:</p>
+                <div class="queue-position" id="queuePositionDisplay">1</div>
+                <div class="patient-name-display" id="patientNameDisplay">Your Name</div>
+                <p style="opacity: 0.85; font-size: 0.95em; margin: 15px 0;">Please wait for your turn. We'll notify you when it's time.</p>
+                <div class="confirmation-buttons">
+                    <button onclick="viewQueueStatus()">👀 View Queue</button>
+                    <button onclick="registerAnother()">➕ Register Another</button>
+                </div>
+            </div>
+
+            <!-- Registration form -->
+            <div class="form-container" id="formContainer">
                 <div id="message" class="message"></div>
                 
-                <form id="registrationForm">
+                <form id="registrationForm" autocomplete="off">
                     <div class="form-group">
                         <label for="name">Full Name *</label>
-                        <input type="text" id="name" name="name" required placeholder="Enter your full name">
+                        <input type="text" id="name" name="name" required placeholder="Enter your full name" autocomplete="name">
                     </div>
                     
                     <div class="form-group">
                         <label for="phone">Phone Number *</label>
-                        <input type="tel" id="phone" name="phone" required placeholder="Enter phone number">
+                        <input type="tel" id="phone" name="phone" required placeholder="e.g., 0123 456 789" autocomplete="tel">
                     </div>
                     
                     <div class="form-group">
-                        <label for="age">Age</label>
-                        <input type="number" id="age" name="age" min="1" max="150" placeholder="Enter age">
+                        <label for="age">Age (optional)</label>
+                        <input type="number" id="age" name="age" min="1" max="150" placeholder="Enter your age">
                     </div>
                     
                     <div class="form-group">
-                        <label for="gender">Gender</label>
+                        <label for="gender">Gender (optional)</label>
                         <select id="gender" name="gender">
                             <option value="other">Prefer not to say</option>
                             <option value="male">Male</option>
@@ -144,9 +322,8 @@
                         </select>
                     </div>
                     
-                    <button type="submit" class="btn btn-primary">Register + Queue Patient</button>
+                    <button type="submit" class="btn btn-primary">✓ Register & Join Queue</button>
                 </form>
-                
             </div>
         </main>
 
@@ -158,8 +335,17 @@
     </div>
 
     <script>
-        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:3000' : '';
-        const REGISTRATION_URL = window.location.href;
+        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:5000' : '';
+        const MOBILE_BASE_URL = (() => {
+            const { hostname, origin } = window.location;
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return 'http://10.243.230.122:5000';
+            }
+            return origin;
+        })();
+        const REGISTRATION_URL = `${MOBILE_BASE_URL}/register.html`;
+        let currentPatientId = null;
+        let currentPatientName = null;
 
         function setShareStatus(text) {
             const statusEl = document.getElementById('shareStatus');
@@ -190,18 +376,18 @@
                 if (navigator.share) {
                     await navigator.share({
                         title: 'Hemoglobin Detector Registration',
-                        text: 'Open this registration page on your device',
+                        text: 'Register for hemoglobin testing. Simple, quick, and non-invasive.',
                         url: REGISTRATION_URL,
                     });
-                    setShareStatus('Link shared successfully.');
+                    setShareStatus('✓ Link shared successfully!');
                     return;
                 }
 
                 await copyRegistrationLink();
-                setShareStatus('Link copied to clipboard.');
+                setShareStatus('✓ Link copied to clipboard.');
             } catch (err) {
                 console.warn('Share failed:', err);
-                setShareStatus('Could not open the share sheet. Use Copy link instead.');
+                setShareStatus('Could not share. Try using Copy link button.');
             }
         }
 
@@ -210,80 +396,146 @@
         document.getElementById('copyLinkButton').addEventListener('click', async () => {
             try {
                 await copyRegistrationLink();
-                setShareStatus('Link copied to clipboard.');
+                setShareStatus('✓ Link copied to clipboard.');
             } catch (err) {
                 console.warn('Copy failed:', err);
                 setShareStatus('Could not copy the link.');
             }
         });
         
+        async function sendCommand(action, payload) {
+            const response = await fetch(API_BASE + '/api/commands', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, ...payload })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || `Command failed: ${action}`);
+            }
+            return data;
+        }
+
         function showMessage(text, isError = false) {
             const msg = document.getElementById('message');
             msg.textContent = text;
             msg.className = 'message ' + (isError ? 'error' : 'success');
+        }
+
+        function showConfirmation(patientName, queuePosition) {
+            currentPatientId = currentPatientId;
+            currentPatientName = patientName;
+            
+            document.getElementById('patientNameDisplay').textContent = patientName;
+            document.getElementById('queuePositionDisplay').textContent = queuePosition;
+            document.getElementById('formContainer').style.display = 'none';
+            document.getElementById('confirmationContainer').classList.add('show');
+            document.body.classList.add('registering');
+            
+            // Hide sidebar on mobile
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = 'none';
+        }
+
+        function registerAnother() {
+            document.getElementById('registrationForm').reset();
+            document.getElementById('formContainer').style.display = 'block';
+            document.getElementById('confirmationContainer').classList.remove('show');
+            document.body.classList.remove('registering');
+            
+            // Show sidebar again
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) sidebar.style.display = '';
+            
+            showMessage('', false);
+        }
+
+        function viewQueueStatus() {
+            // Redirect to patient status page with patient info
+            const params = new URLSearchParams({
+                patientId: currentPatientId,
+                name: currentPatientName
+            });
+            window.location.href = `${MOBILE_BASE_URL}/patient-status.html?` + params.toString();
         }
         
         document.getElementById('registrationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const formData = new FormData(e.target);
-            const params = new URLSearchParams();
-            for (const [key, value] of formData) {
-                params.append(key, value);
-            }
+            const patientName = String(formData.get('name') || '');
+            const payload = {
+                name: patientName,
+                phone: String(formData.get('phone') || ''),
+                gender: String(formData.get('gender') || 'other'),
+                age: String(formData.get('age') || '0')
+            };
             
             try {
-                const response = await fetch(API_BASE + '/api/patients', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: params.toString()
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    const patientId = data.patientId;
-                    
+                let patientId = '';
+                let state = null;
+                let queuePosition = 1;
+
+                // New backend contract
+                try {
+                    const registerData = await sendCommand('register_patient', payload);
+                    patientId = String(registerData.patientId || '');
+                    currentPatientId = patientId;
                     showMessage('Patient registered! Queuing for diagnosis...', false);
-                    
-                    // Wait a moment for serial output to show registration
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
+
+                    const queueData = await sendCommand('queue_patient', { patientId });
+                    state = queueData.state || null;
+                } catch (_) {
+                    // Legacy fallback for ESP32 firmware endpoint compatibility
+                    const params = new URLSearchParams(payload).toString();
+                    const response = await fetch(API_BASE + '/api/patients', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params
+                    });
+                    const data = await response.json();
+                    if (!data.success) {
+                        throw new Error(data.error || 'Registration failed');
+                    }
+                    patientId = String(data.patientId || '');
+                    currentPatientId = patientId;
+                    showMessage('Patient registered! Queuing for diagnosis...', false);
+
                     const queueRes = await fetch(API_BASE + '/api/queue', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: new URLSearchParams({ patientId: String(patientId) }).toString()
+                        body: new URLSearchParams({ patientId }).toString()
                     });
-                    
-                    const queueData = await queueRes.json();
-                    if (queueData.success) {
-                        showMessage('✓ ' + data.message + ' - Queue Position: #' + queueData.position, false);
-                        
-                        // Broadcast to all dashboard pages via localStorage
-                        if (typeof(Storage) !== "undefined") {
-                            const event = {
-                                type: 'patient-queued',
-                                patientId: patientId,
-                                patientName: queueData.patientName || 'Unknown',
-                                position: queueData.position,
-                                timestamp: new Date().toISOString()
-                            };
-                            localStorage.setItem('hemoglobin-event', JSON.stringify(event));
-                        }
-                        
-                        e.target.reset();
-                        
-                        // Keep success message visible for 3 seconds
-                        setTimeout(() => {
-                            document.getElementById('message').style.display = 'none';
-                        }, 3000);
-                    } else {
-                        showMessage('Registered but failed to queue: ' + (queueData.error || 'Unknown error'), true);
+                    const queueJson = await queueRes.json();
+                    if (!queueJson.success) {
+                        throw new Error(queueJson.error || 'Failed to queue patient');
                     }
-                } else {
-                    showMessage(data.error || 'Registration failed', true);
                 }
+
+                queuePosition = state && Array.isArray(state.queue)
+                    ? state.queue.findIndex((q) => String(q.patientId) === patientId) + 1
+                    : 1;
+
+                // Broadcast to all dashboard pages via localStorage
+                if (typeof(Storage) !== "undefined") {
+                    const event = {
+                        type: 'patient-queued',
+                        patientId,
+                        patientName,
+                        queuePosition,
+                        stateVersion: state && state.stateVersion ? state.stateVersion : null,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem('hemoglobin-event', JSON.stringify(event));
+                }
+
+                // Show confirmation view
+                setTimeout(() => {
+                    showConfirmation(patientName, queuePosition);
+                }, 500);
+                
             } catch (err) {
-                showMessage('Error: ' + err.message, true);
+                showMessage('❌ Error: ' + err.message, true);
             }
         });
     </script>

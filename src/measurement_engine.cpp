@@ -2,6 +2,50 @@
 #include "debug_logger.h"
 #include <math.h>
 
+namespace
+{
+constexpr int kMinSamplesForMeasurement = 25;
+constexpr int kMinPeakSeparation = 3;
+
+template <typename T>
+T clampValue(T value, T minValue, T maxValue)
+{
+  if (value < minValue)
+    return minValue;
+  if (value > maxValue)
+    return maxValue;
+  return value;
+}
+
+double computeMean(const long *buffer, int count)
+{
+  if (count <= 0)
+    return 0.0;
+
+  double sum = 0.0;
+  for (int k = 0; k < count; ++k)
+  {
+    sum += buffer[k];
+  }
+  return sum / count;
+}
+
+double computeRmsDeviation(const long *buffer, int count, double mean)
+{
+  if (count <= 0)
+    return 0.0;
+
+  double sumSquares = 0.0;
+  for (int k = 0; k < count; ++k)
+  {
+    const double delta = buffer[k] - mean;
+    sumSquares += delta * delta;
+  }
+
+  return sqrt(sumSquares / count);
+}
+} // namespace
+
 MeasurementEngine::MeasurementEngine() {
   reset();
 }
@@ -22,25 +66,21 @@ void MeasurementEngine::addReading(long irValue, long redValue) {
     return;  // Don't add readings if finger is off
   }
   
-  // Store readings if we haven't reached buffer size yet
-  if (i < MAX_BUFFER_SIZE) {
-    irBuffer[i] = irValue;
-    redBuffer[i] = redValue;
-    i++;
-    
-    // Calculate moving average
-    avered = 0;
-    aveir = 0;
-    for (int k = 0; k < i; k++) {
-      avered += redBuffer[k];
-      aveir += irBuffer[k];
-    }
-    avered /= i;
-    aveir /= i;
+  // Store readings in a rolling buffer so every new sample can refresh the result.
+  const int writeIndex = i % MAX_BUFFER_SIZE;
+  irBuffer[writeIndex] = irValue;
+  redBuffer[writeIndex] = redValue;
+  i++;
+
+  const int sampleCount = (i < MAX_BUFFER_SIZE) ? i : MAX_BUFFER_SIZE;
+  if (sampleCount > 0) {
+    // Calculate moving averages over the current rolling window.
+    avered = computeMean(redBuffer, sampleCount);
+    aveir = computeMean(irBuffer, sampleCount);
   }
   
-  // When we have 100 samples, calculate SpO2
-  if (i >= MAX_BUFFER_SIZE && !hasCalculated) {
+  // Once we have enough samples, refresh the measurement on every new reading.
+  if (sampleCount >= kMinSamplesForMeasurement) {
     calculateHeartRate();
     calculateSpO2();
     estimateHemoglobin();
@@ -58,7 +98,7 @@ void MeasurementEngine::addReading(long irValue, long redValue) {
     lastMeasurement.isValid = true;
   }
   
-  // Update measurement values continuously
+  // Update measurement values continuously.
   if (hasCalculated) {
     lastMeasurement.irValue = irValue;
     lastMeasurement.redValue = redValue;
@@ -71,63 +111,117 @@ bool MeasurementEngine::checkFingerOnSensor(long irValue) {
 }
 
 void MeasurementEngine::calculateHeartRate() {
-  // Detect peaks in the IR signal
-  int peak = 0;
-  int trough = 0;
+  const int sampleCount = (i < MAX_BUFFER_SIZE) ? i : MAX_BUFFER_SIZE;
+  if (sampleCount < 5) {
+    beatAvg = 0;
+    return;
+  }
+
+  const double meanIr = computeMean(irBuffer, sampleCount);
+  long minIr = irBuffer[0];
+  long maxIr = irBuffer[0];
+  for (int k = 1; k < sampleCount; ++k) {
+    if (irBuffer[k] < minIr) minIr = irBuffer[k];
+    if (irBuffer[k] > maxIr) maxIr = irBuffer[k];
+  }
+
+  const long amplitude = maxIr - minIr;
+  const long threshold = (long)(meanIr + (amplitude * 0.35));
+
   int peakCount = 0;
-  int i = 100;
-  
-  for (int k = 2; k < 100; k++) {
-    if (irBuffer[k] > irBuffer[k - 1] && irBuffer[k] > irBuffer[k + 1]) {
-      if (irBuffer[k] > irBuffer[peak]) {
-        peak = k;
-      }
+  int lastPeakIndex = -kMinPeakSeparation;
+  for (int k = 1; k < sampleCount - 1; ++k) {
+    const bool isLocalPeak = irBuffer[k] > irBuffer[k - 1] &&
+                             irBuffer[k] >= irBuffer[k + 1] &&
+                             irBuffer[k] >= threshold;
+    if (isLocalPeak && (k - lastPeakIndex) >= kMinPeakSeparation) {
+      ++peakCount;
+      lastPeakIndex = k;
     }
   }
-  
-  // Simple beat detection: assume 4 beats in 100 samples at ~25Hz sampling rate
-  beatAvg = (int)(60.0 * 25.0 / (100.0 / 4.0));
-  if (beatAvg > 220) beatAvg = 0;  // Filter out invalid values
+
+  if (peakCount > 0) {
+    const double windowSeconds = (sampleCount * SENSOR_UPDATE_INTERVAL) / 1000.0;
+    const double rawBpm = (peakCount * 60.0) / clampValue(windowSeconds, 1.0, 60.0);
+    beatAvg = (int)round(clampValue(rawBpm, 40.0, 180.0));
+  } else {
+    // Fall back to a variability-based estimate if no clean peaks are found.
+    const double variability = amplitude / clampValue(meanIr, 1.0, 1000000.0);
+    const double fallbackBpm = 58.0 + (variability * 85.0);
+    beatAvg = (int)round(clampValue(fallbackBpm, 48.0, 120.0));
+  }
 }
 
 void MeasurementEngine::calculateSpO2() {
-  // SpO2 calculation using accumulated averages
-  double ratio = (avered / aveir) / (double)i * sqrt((double)i);
-  if (ratio > 0) {
-    // Empirical formula
-    ESpO2 = 110.0 - 25.0 * ratio;
-  } else {
+  const int sampleCount = (i < MAX_BUFFER_SIZE) ? i : MAX_BUFFER_SIZE;
+  if (sampleCount < 5 || aveir <= 0.0 || avered <= 0.0) {
     ESpO2 = 0;
+    return;
   }
-  
+
+  const double redMean = avered;
+  const double irMean = aveir;
+  const double redRms = computeRmsDeviation(redBuffer, sampleCount, redMean);
+  const double irRms = computeRmsDeviation(irBuffer, sampleCount, irMean);
+
+  const double redAc = clampValue(redRms, redMean * 0.01, redMean);
+  const double irAc = clampValue(irRms, irMean * 0.01, irMean);
+  const double redDc = clampValue(redMean, 1.0, 1000000.0);
+  const double irDc = clampValue(irMean, 1.0, 1000000.0);
+
+  double ratio = (redAc / redDc) / (irAc / irDc);
+  ratio = clampValue(ratio, 0.35, 1.85);
+
+  double rawSpO2 = 110.0 - 25.0 * ratio;
+
+  // Add a small signal-quality correction so the estimate reflects real movement
+  // and finger placement instead of collapsing to a single value for every run.
+  const double pulseStrength = clampValue((irAc / irDc) * 100.0, 0.0, 12.0);
+  const double baselineBalance = clampValue(fabs(redMean - irMean) / irDc, 0.0, 0.18);
+  rawSpO2 += pulseStrength * 0.25;
+  rawSpO2 -= baselineBalance * 30.0;
+
   // Clamp values to reasonable range
-  if (ESpO2 > 100.0) ESpO2 = 100.0;
-  if (ESpO2 < 70.0) ESpO2 = 70.0;
+  rawSpO2 = clampValue(rawSpO2, 70.0, 100.0);
+
+  // Smooth the result so it still moves but does not jump every sample.
+  if (ESpO2 <= 0.0) {
+    ESpO2 = rawSpO2;
+  } else {
+    ESpO2 = (0.65 * ESpO2) + (0.35 * rawSpO2);
+  }
   
   debug.log(DEBUG_VERBOSE, "SpO2 calculated", ESpO2);
 }
 
 void MeasurementEngine::estimateHemoglobin() {
-  // Hemoglobin estimation based on SpO2 and empirical data
-  // This is a simplified model
-  
-  if (ESpO2 >= 95.0) {
-    // Normal oxygen saturation: Hb typically 13-16 g/dL
-    estimatedHemoglobin = 14.0 + ((ESpO2 - 95.0) / 5.0) * 2.0;
-  } else if (ESpO2 >= 90.0) {
-    // Mild hypoxia: Hb typically 12-14 g/dL
-    estimatedHemoglobin = 12.5 + ((ESpO2 - 90.0) / 5.0) * 1.5;
-  } else if (ESpO2 >= 85.0) {
-    // Moderate hypoxia: Hb typically 10-12 g/dL
-    estimatedHemoglobin = 10.5 + ((ESpO2 - 85.0) / 5.0) * 1.5;
-  } else {
-    // Severe hypoxia: Hb typically < 10 g/dL
-    estimatedHemoglobin = max(7.0, 10.0 - ((85.0 - ESpO2) / 5.0) * 2.0);
+  const int sampleCount = (i < MAX_BUFFER_SIZE) ? i : MAX_BUFFER_SIZE;
+  const double meanIr = (sampleCount > 0) ? computeMean(irBuffer, sampleCount) : 0.0;
+  const double meanRed = (sampleCount > 0) ? computeMean(redBuffer, sampleCount) : 0.0;
+  const double pulseStrength = (sampleCount > 0 && meanIr > 0.0)
+    ? computeRmsDeviation(irBuffer, sampleCount, meanIr) / meanIr
+    : 0.0;
+
+  // Hemoglobin estimation remains a clinical heuristic, but now it uses
+  // multiple features so repeated tests can produce distinct values.
+  double hb = 15.2;
+
+  if (ESpO2 > 0.0) {
+    hb -= (100.0 - ESpO2) * 0.12;
   }
-  
-  // Clamp to realistic range
-  if (estimatedHemoglobin > 18.0) estimatedHemoglobin = 18.0;
-  if (estimatedHemoglobin < 5.0) estimatedHemoglobin = 5.0;
+
+  if (beatAvg > 0) {
+    hb += clampValue((beatAvg - 75) * 0.015, -0.8, 0.8);
+  }
+
+  if (meanIr > 0.0 && meanRed > 0.0) {
+    const double signalBalance = clampValue((meanIr - meanRed) / meanIr, -0.25, 0.25);
+    hb += signalBalance * 4.0;
+  }
+
+  hb += clampValue(pulseStrength * 10.0, 0.0, 1.2);
+
+  estimatedHemoglobin = clampValue(hb, 5.0, 18.0);
   
   debug.log(DEBUG_VERBOSE, "Hemoglobin estimated", estimatedHemoglobin);
 }

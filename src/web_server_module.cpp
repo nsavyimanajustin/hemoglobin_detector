@@ -10,6 +10,37 @@ static void logWorkflowEvent(const char *event, const String &details)
   Serial.flush();
 }
 
+static void addLcdState(JsonObject lcd,
+                        bool canMeasure,
+                        const String &activePatientName,
+                        const String &nextPatientName,
+                        int queueCount,
+                        bool fingerDetected)
+{
+  if (canMeasure)
+  {
+    lcd["line1"] = "Diagnosis Active";
+    lcd["line2"] = activePatientName;
+    lcd["line3"] = fingerDetected ? "Measuring..." : "Place finger";
+    lcd["line4"] = fingerDetected ? "Keep still" : "on sensor now";
+    return;
+  }
+
+  if (queueCount > 0)
+  {
+    lcd["line1"] = String("Queue: ") + queueCount;
+    lcd["line2"] = String("Next: ") + nextPatientName;
+    lcd["line3"] = "Awaiting sensor";
+    lcd["line4"] = "placement";
+    return;
+  }
+
+  lcd["line1"] = "Hemoglobin Det.";
+  lcd["line2"] = "v1.0 Ready";
+  lcd["line3"] = "Register patient";
+  lcd["line4"] = "to begin scan";
+}
+
 void WebServerModule::publishEvent(const String &eventType, const String &message, const String &details)
 {
   JsonDocument doc;
@@ -275,6 +306,7 @@ void WebServerModule::setupRestAPI()
     doc["timestamp"] = m.timestamp;
     doc["valid"] = m.isValid && canMeasure();
     doc["canMeasure"] = canMeasure();
+    doc["sensorEnabled"] = canMeasure();
     doc["activePatientId"] = activePatientId;
     doc["activePatientName"] = activePatientName;
     
@@ -297,6 +329,14 @@ void WebServerModule::setupRestAPI()
     } else {
       doc["workflowMessage"] = "No patients in queue";
     }
+
+    JsonObject lcd = doc["lcd"].to<JsonObject>();
+    addLcdState(lcd,
+                canMeasure(),
+                activePatientName,
+                getNextQueuedPatientName(),
+                patientManager.getQueueCount(),
+                getFingerDetected());
     
     String response;
     serializeJson(doc, response);
@@ -310,11 +350,25 @@ void WebServerModule::setupRestAPI()
     doc["uptime_ms"] = millis();
     doc["has_measurement"] = measurementEngine->getMeasurement().isValid;
     doc["canMeasure"] = canMeasure();
+    doc["sensorEnabled"] = canMeasure();
     doc["activePatientId"] = activePatientId;
     doc["activePatientName"] = activePatientName;
     doc["diagnosisActive"] = diagnosisActive;
     doc["queueCount"] = patientManager.getQueueCount();
     doc["nextPatientName"] = getNextQueuedPatientName();
+    doc["workflowMessage"] = canMeasure()
+      ? String("Diagnosing: ") + activePatientName
+      : (patientManager.getQueueCount() > 0
+          ? String("Waiting to call ") + getNextQueuedPatientName()
+          : "Register and queue a patient first");
+
+    JsonObject lcd = doc["lcd"].to<JsonObject>();
+    addLcdState(lcd,
+                canMeasure(),
+                activePatientName,
+                getNextQueuedPatientName(),
+                patientManager.getQueueCount(),
+                getFingerDetected());
     
     String response;
     serializeJson(doc, response);

@@ -4,7 +4,8 @@
  */
 
 // Configuration
-const API_BASE = '/api';
+const API_ROOT = window.location.search.includes('test=1') ? 'http://localhost:5000' : '';
+const API_BASE = `${API_ROOT}/api`;
 const UPDATE_INTERVAL = 2000;
 const HISTORY_SIZE = 60;
 
@@ -18,82 +19,14 @@ let eventStreamRetryTimer = null;
 let charts = {};
 let lastUptimeMs = 0;
 let lastUptimeFetchAt = 0;
+let lastStateVersion = 0;
 const USE_EVENT_STREAM = !window.location.search.includes('test=1') && typeof EventSource !== 'undefined';
-
-// ── Serial Monitor ───────────────────────────────────────────────────────────
-const MAX_SERIAL_LINES = 150;
-const serialLines = [];
-
-function appendSerialLine(entry) {
-    serialLines.push(entry);
-    if (serialLines.length > MAX_SERIAL_LINES) serialLines.shift();
-    renderSerialLine(entry);
-}
-
-function renderSerialLine(entry) {
-    const output = document.getElementById('serialOutput');
-    if (!output) return;
-
-    const ts = entry.timestamp ? entry.timestamp.replace('T', ' ').replace('Z', '') : '';
-    const tag = entry.tag || '';
-    const details = entry.details || entry.message || '';
-
-    const div = document.createElement('p');
-    div.className = `serial-entry tag-${tag}`;
-    div.innerHTML = `<span class="ts">[${ts}]</span> <span class="tag">${tag || 'LOG'}</span>: <span class="msg">${escapeHtml(details)}</span>`;
-
-    output.appendChild(div);
-
-    // Auto-scroll to bottom
-    output.scrollTop = output.scrollHeight;
-}
 
 function escapeHtml(str) {
     return String(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-}
-
-function clearSerialLog() {
-    serialLines.length = 0;
-    const output = document.getElementById('serialOutput');
-    if (output) output.innerHTML = '';
-}
-
-// ── LCD Display ──────────────────────────────────────────────────────────────
-function updateLcd(line1, line2, line3, line4) {
-    const set = (id, text, cursor) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const content = escapeHtml(String(text || '').padEnd(16).substring(0, 16));
-        el.innerHTML = content + (cursor ? '<span class="lcd-cursor">_</span>' : '');
-    };
-    set('lcd-line1', line1, true);
-    set('lcd-line2', line2, false);
-    set('lcd-line3', line3, false);
-    set('lcd-line4', line4, false);
-}
-
-function applyLcdState(lcd) {
-    if (!lcd) return;
-    updateLcd(lcd.line1, lcd.line2, lcd.line3, lcd.line4);
-}
-
-function updateSensorBadge(enabled) {
-    const badge = document.getElementById('sensor-badge');
-    const dot   = document.getElementById('sensor-dot');
-    const label = document.getElementById('sensor-label');
-    if (!badge) return;
-    if (enabled) {
-        badge.className = 'sensor-status enabled';
-        dot.className   = 'sensor-dot on';
-        label.textContent = 'Enabled';
-    } else {
-        badge.className = 'sensor-status disabled';
-        dot.className   = 'sensor-dot off';
-        label.textContent = 'Disabled';
-    }
 }
 
 // ── Initialization ───────────────────────────────────────────────────────────
@@ -130,7 +63,7 @@ function startEventStream() {
     if (eventStream) eventStream.close();
 
     try {
-        eventStream = new EventSource('/events');
+        eventStream = new EventSource(`${API_ROOT}/events`);
 
         eventStream.addEventListener('open', () => {
             console.log('Live event stream connected');
@@ -143,38 +76,14 @@ function startEventStream() {
         const handleStateEvent = (event) => {
             try {
                 const payload = JSON.parse(event.data);
-                fetchMeasurements();
+                if (payload.state) {
+                    applyStateSnapshot(payload.state);
+                } else {
+                    fetchMeasurements();
+                }
                 fetchQueueStatus();
                 console.log('State event:', event.type, payload.message);
             } catch (_) {}
-        };
-
-        const handleSerialLog = (event) => {
-            try {
-                const payload = JSON.parse(event.data);
-                // Parse the tag and details out of the message if structured
-                const tagMatch = payload.details && payload.details.match(/^([A-Z_]+): (.*)$/);
-                const entry = tagMatch
-                    ? { timestamp: payload.timestamp, tag: tagMatch[1], details: tagMatch[2] }
-                    : { timestamp: payload.timestamp, tag: 'LOG', details: payload.message };
-                appendSerialLine(entry);
-            } catch (_) {}
-        };
-
-        const handleLcdUpdate = (event) => {
-            try {
-                const payload = JSON.parse(event.data);
-                // New format: payload.lcd is the full 4-line state object
-                applyLcdState(payload.lcd);
-            } catch (_) {}
-        };
-
-        const handleSensorEnabled = () => {
-            updateSensorBadge(true);
-        };
-
-        const handleSensorDisabled = () => {
-            updateSensorBadge(false);
         };
 
         ['patient_registered', 'api_patient_registered',
@@ -183,10 +92,11 @@ function startEventStream() {
          'diagnosis_completed', 'next_patient_called', 'queue_empty']
             .forEach(type => eventStream.addEventListener(type, handleStateEvent));
 
-        eventStream.addEventListener('serial_log', handleSerialLog);
-        eventStream.addEventListener('lcd_update', handleLcdUpdate);
-        eventStream.addEventListener('sensor_enabled', handleSensorEnabled);
-        eventStream.addEventListener('sensor_disabled', handleSensorDisabled);
+        eventStream.addEventListener('state_snapshot', handleStateEvent);
+        eventStream.addEventListener('state_updated', () => {
+            fetchMeasurements();
+            fetchQueueStatus();
+        });
 
         eventStream.onerror = () => {
             console.warn('Live event stream disconnected; retrying...');
@@ -240,8 +150,6 @@ function initializeCharts() {
                 labels: [],
                 datasets: [
                     { label: 'Heart Rate (BPM)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y' },
-                    { label: 'SpO2 (%)', data: [], borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y1' },
-                    { label: 'Hemoglobin (g/dL)', data: [], borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.05)', tension: 0.4, borderWidth: 2, yAxisID: 'y2' }
                 ]
             },
             options: {
@@ -264,8 +172,69 @@ function startUpdating() {
     updateInterval = setInterval(fetchMeasurements, UPDATE_INTERVAL);
 }
 
+function normalizeFromState(state) {
+    const m = state.measurements || {};
+    return {
+        heartRate: Number(m.heartRate || 0),
+        spO2: Number(m.spO2 || 0),
+        hemoglobin: Number(m.hemoglobin || 0),
+        status: m.status || 'IDLE',
+        irValue: Number(m.irValue || 0),
+        redValue: Number(m.redValue || 0),
+        valid: Boolean(m.valid),
+        timestamp: Date.now(),
+        canMeasure: Boolean(state.canMeasure),
+        sensorEnabled: Boolean(state.sensorEnabled),
+        activePatientId: state.activePatientId || '',
+        activePatientName: state.activePatientName || '',
+        workflowMessage: state.workflowMessage || '',
+        lcd: state.lcd || null,
+        fingerDetected: false,
+        measurementInProgress: Boolean(state.canMeasure),
+        stateVersion: Number(state.stateVersion || 0),
+    };
+}
+
+function applyStateSnapshot(state) {
+    const incomingVersion = Number(state.stateVersion || 0);
+    if (incomingVersion > 0 && incomingVersion < lastStateVersion) {
+        return;
+    }
+    if (incomingVersion > 0) {
+        lastStateVersion = incomingVersion;
+    }
+
+    const uptimeMs = Number(state.uptime_ms || 0);
+    if (Number.isFinite(uptimeMs) && uptimeMs > 0) {
+        lastUptimeMs = uptimeMs;
+        lastUptimeFetchAt = Date.now();
+    }
+
+    updateDashboard(normalizeFromState(state));
+}
+
+async function fetchStateSnapshot() {
+    const response = await fetch(`${API_BASE}/state`);
+    if (!response.ok) {
+        throw new Error('state endpoint unavailable');
+    }
+    const data = await response.json();
+    if (!data.success || !data.state) {
+        throw new Error('invalid state response');
+    }
+    return data.state;
+}
+
 async function fetchMeasurements() {
     try {
+        try {
+            const state = await fetchStateSnapshot();
+            applyStateSnapshot(state);
+            isOnline = true;
+            updateOnlineStatus(true);
+            return;
+        } catch (_) {}
+
         const response = await fetch(`${API_BASE}/measurements`);
         if (!response.ok) throw new Error('Network error');
         const data = await response.json();
@@ -281,6 +250,19 @@ async function fetchMeasurements() {
 
 async function fetchQueueStatus() {
     try {
+        try {
+            const state = await fetchStateSnapshot();
+            const event = new CustomEvent('queueUpdated', {
+                detail: {
+                    queue: state.queue || [],
+                    total: state.queueCount || 0,
+                    nextPatient: state.nextPatientName || null,
+                },
+            });
+            window.dispatchEvent(event);
+            return;
+        } catch (_) {}
+
         const response = await fetch(`${API_BASE}/queue`);
         if (!response.ok) throw new Error('Network error');
         const data = await response.json();
@@ -329,18 +311,16 @@ function updateDashboard(data) {
     updateDetails(data);
     updateCharts(measurements);
 
-    document.getElementById('last-update').textContent = formatTime(new Date(data.timestamp || Date.now()));
+    const lastUpdateEl = document.getElementById('last-update');
+    if (lastUpdateEl) {
+        lastUpdateEl.textContent = formatTime(new Date(data.timestamp || Date.now()));
+    }
 
-    const activePatient  = document.getElementById('active-patient');
-    const workflowMsg    = document.getElementById('workflow-message');
+    const activePatient = document.getElementById('active-patient');
+    const workflowMsg = document.getElementById('workflow-message');
     if (activePatient) activePatient.textContent = data.activePatientName || 'None';
-    if (workflowMsg)   workflowMsg.textContent   = data.workflowMessage || 'Waiting for queue';
+    if (workflowMsg) workflowMsg.textContent = data.workflowMessage || 'Waiting for queue';
 
-    // Update sensor badge from measurement data
-    updateSensorBadge(data.sensorEnabled || data.canMeasure);
-
-    // Update LCD from measurement data (fallback if no SSE event)
-    applyLcdState(data.lcd);
 }
 
 function updateGauges(data) {
@@ -376,17 +356,21 @@ function updateGauges(data) {
 }
 
 function updateDetails(data) {
-    document.getElementById('ir-value').textContent  = data.irValue  || '--';
-    document.getElementById('red-value').textContent = data.redValue || '--';
-
+    const irValue = document.getElementById('ir-value');
+    const redValue = document.getElementById('red-value');
     const measuringBadge = document.getElementById('measuring');
-    // FIX: use canMeasure (active patient present) not heartRate > 0
-    if (data.canMeasure) {
-        measuringBadge.textContent = 'Yes';
-        measuringBadge.classList.add('active');
-    } else {
-        measuringBadge.textContent = 'No';
-        measuringBadge.classList.remove('active');
+
+    if (irValue) irValue.textContent = data.irValue || '--';
+    if (redValue) redValue.textContent = data.redValue || '--';
+
+    if (measuringBadge) {
+        if (data.canMeasure) {
+            measuringBadge.textContent = 'Yes';
+            measuringBadge.classList.add('active');
+        } else {
+            measuringBadge.textContent = 'No';
+            measuringBadge.classList.remove('active');
+        }
     }
 }
 
@@ -438,6 +422,12 @@ function updateUptime() {
 
 async function fetchStatus() {
     try {
+        try {
+            const state = await fetchStateSnapshot();
+            applyStateSnapshot(state);
+            return;
+        } catch (_) {}
+
         const response = await fetch(`${API_BASE}/status`);
         if (!response.ok) return;
         const data = await response.json();
@@ -456,9 +446,6 @@ async function fetchStatus() {
                 : (data.queueCount > 0 ? 'Patient queued — starting diagnosis...' : 'Register and queue a patient first');
         }
 
-        // Update sensor & LCD from status if no recent SSE event
-        updateSensorBadge(Boolean(data.sensorEnabled));
-        applyLcdState(data.lcd);
     } catch (_) {}
 }
 

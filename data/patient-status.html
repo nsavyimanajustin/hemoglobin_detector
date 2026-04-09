@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Queue Status - Hemoglobin Detector</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+
+        .patient-status-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.95);
+            color: #333;
+            border-radius: 20px;
+            padding: 40px 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .status-header {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .queue-number {
+            font-size: 5em;
+            font-weight: 800;
+            color: #667eea;
+            margin: 20px 0;
+            line-height: 1;
+        }
+
+        .patient-info {
+            margin: 25px 0;
+            line-height: 1.8;
+        }
+
+        .patient-name {
+            font-size: 1.6em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .patient-status-text {
+            font-size: 1.1em;
+            color: #666;
+            margin: 10px 0;
+        }
+
+        .status-icon {
+            display: inline-block;
+            font-size: 3em;
+            margin: 15px 0;
+        }
+
+        .status-waiting {
+            color: #f39c12;
+        }
+
+        .status-preparing {
+            color: #3498db;
+        }
+
+        .status-measuring {
+            color: #e74c3c;
+        }
+
+        .status-ready {
+            color: #2ecc71;
+        }
+
+        .status-details {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 25px 0;
+            font-size: 0.95em;
+            color: #555;
+        }
+
+        .queue-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        .queue-info-item {
+            background: #f0f0f0;
+            padding: 12px;
+            border-radius: 8px;
+            color: #333;
+        }
+
+        .queue-info-label {
+            color: #666;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+
+        .queue-info-value {
+            font-size: 1.4em;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-height: 48px;
+            touch-action: manipulation;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .btn-secondary:active {
+            background: #f5f5f5;
+        }
+
+        .notification-badge {
+            display: inline-block;
+            background: #e74c3c;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin: 15px 0;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(102, 126, 234, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #667eea;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .offline-notice {
+            background: #e74c3c;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 500;
+        }
+
+        .last-updated {
+            font-size: 0.8em;
+            color: #999;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .status-card {
+                padding: 30px 16px;
+            }
+
+            .queue-number {
+                font-size: 3.5em;
+            }
+
+            .patient-name {
+                font-size: 1.4em;
+            }
+
+            .btn {
+                font-size: 1em;
+                padding: 12px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="patient-status-container">
+        <div class="status-card">
+            <div class="status-header" id="statusHeader">Your Current Position</div>
+            
+            <div id="statusContent">
+                <div class="loading-spinner"></div>
+                <p style="margin-top: 20px;">Loading your queue status...</p>
+            </div>
+
+            <div class="last-updated" id="lastUpdated"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:5000' : '';
+        const UPDATE_INTERVAL = 3000; // Update every 3 seconds
+        let statusUpdateInterval = null;
+        let patientId = null;
+        let patientName = null;
+
+        /**
+         * Get patient ID and name from URL params, session, or localStorage
+         */
+        function getPatientInfo() {
+            // Try URL parameter first
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('patientId') && urlParams.has('name')) {
+                return {
+                    patientId: urlParams.get('patientId'),
+                    name: decodeURIComponent(urlParams.get('name'))
+                };
+            }
+
+            // Try sessionStorage
+            if (window.sessionStorage) {
+                const stored = sessionStorage.getItem('hemoglobin-patient-info');
+                if (stored) {
+                    return JSON.parse(stored);
+                }
+            }
+
+            // Try localStorage from registration event
+            if (window.localStorage) {
+                const event = localStorage.getItem('hemoglobin-event');
+                if (event) {
+                    try {
+                        const data = JSON.parse(event);
+                        if (data.patientId && data.type === 'patient-queued') {
+                            return {
+                                patientId: data.patientId,
+                                name: data.patientName
+                            };
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse event:', e);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /**
+         * Fetch current queue status from API
+         */
+        async function fetchQueueStatus() {
+            try {
+                const response = await fetch(API_BASE + '/api/state');
+                const data = await response.json();
+
+                if (!data.success || !data.state) {
+                    throw new Error('Failed to fetch queue status');
+                }
+
+                return data.state;
+            } catch (error) {
+                console.error('Error fetching queue status:', error);
+                return null;
+            }
+        }
+
+        /**
+         * Determine patient's current status
+         */
+        function getPatientStatus(state, patientId) {
+            if (!state || !state.queue) {
+                return { position: null, status: 'unknown', message: 'Unable to determine status' };
+            }
+
+            // Find patient in queue
+            const queueIndex = state.queue.findIndex(q => String(q.patientId) === String(patientId));
+
+            if (queueIndex === -1) {
+                return {
+                    position: null,
+                    status: 'not-in-queue',
+                    message: 'Patient not found in queue'
+                };
+            }
+
+            const position = queueIndex + 1;
+            const isActive = state.activePatientId && String(state.activePatientId) === String(patientId);
+
+            if (isActive && state.workflowStage === 'MEASURING') {
+                return {
+                    position,
+                    status: 'measuring',
+                    message: 'Your hemoglobin is being measured now!'
+                };
+            }
+
+            if (position === 1) {
+                return {
+                    position,
+                    status: 'ready',
+                    message: 'You are next! Please be ready.'
+                };
+            }
+
+            const waitingCount = position - 1;
+            return {
+                position,
+                status: 'waiting',
+                message: waitingCount === 1
+                    ? 'One person ahead of you'
+                    : `${waitingCount} people ahead of you`
+            };
+        }
+
+        /**
+         * Format timestamp to readable time
+         */
+        function formatTime(date) {
+            return date.toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        /**
+         * Render the status UI
+         */
+        function renderStatus(state, patientInfo) {
+            const status = getPatientStatus(state, patientInfo.patientId);
+            const { position, status: statusType, message } = status;
+
+            let statusIcon = '⏳';
+            let statusColor = 'status-waiting';
+
+            if (statusType === 'measuring') {
+                statusIcon = '💉';
+                statusColor = 'status-measuring';
+            } else if (statusType === 'ready') {
+                statusIcon = '🔔';
+                statusColor = 'status-ready';
+            } else if (statusType === 'not-in-queue') {
+                statusIcon = '❌';
+                statusColor = 'status-waiting';
+            }
+
+            const queueSize = (state && state.queue) ? state.queue.length : 0;
+
+            let html = `
+                <div class="status-icon ${statusColor}">${statusIcon}</div>
+                <div class="queue-number">${position || '–'}</div>
+                <div class="patient-info">
+                    <div class="patient-name">${patientInfo.name}</div>
+                    <div class="patient-status-text">${message}</div>
+                </div>
+                <div class="queue-info">
+                    <div class="queue-info-item">
+                        <div class="queue-info-label">Queue Position</div>
+                        <div class="queue-info-value">${position || '–'}</div>
+                    </div>
+                    <div class="queue-info-item">
+                        <div class="queue-info-label">Total in Queue</div>
+                        <div class="queue-info-value">${queueSize}</div>
+                    </div>
+                </div>
+            `;
+
+            if (state.source === 'fallback') {
+                html += `<div class="offline-notice">⚠ Connection issue - using cached status</div>`;
+            }
+
+            html += `
+                <div class="action-buttons">
+                    <button class="btn btn-primary" onclick="location.reload()">🔄 Refresh Status</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/index.html'">📊 Back to Dashboard</button>
+                </div>
+            `;
+
+            return html;
+        }
+
+        /**
+         * Update status display
+         */
+        async function updateStatus() {
+            if (!patientId || !patientName) {
+                document.getElementById('statusContent').innerHTML = `
+                    <p style="color: #e74c3c;">❌ Patient information not found</p>
+                    <p style="margin-top: 20px; font-size: 0.9em;">Please complete registration first.</p>
+                    <div class="action-buttons" style="margin-top: 30px;">
+                        <button class="btn btn-primary" onclick="window.location.href='/register.html'">➕ Register Now</button>
+                    </div>
+                `;
+                return;
+            }
+
+            const state = await fetchQueueStatus();
+            const timestamp = new Date();
+
+            if (state) {
+                document.getElementById('statusContent').innerHTML = renderStatus(state, { 
+                    patientId, 
+                    name: patientName 
+                });
+                document.getElementById('lastUpdated').textContent = `Updated at ${formatTime(timestamp)}`;
+            } else {
+                document.getElementById('statusContent').innerHTML = `
+                    <p style="color: #e74c3c;">❌ Unable to connect to system</p>
+                    <p style="margin-top: 20px; font-size: 0.9em;">Please check your connection and try again.</p>
+                    <div class="action-buttons" style="margin-top: 30px;">
+                        <button class="btn btn-primary" onclick="location.reload()"">🔄 Try Again</button>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Initialize the page
+         */
+        async function init() {
+            // Get patient info
+            const info = getPatientInfo();
+            if (!info) {
+                document.getElementById('statusContent').innerHTML = `
+                    <p style="color: #e74c3c;">❌ Patient information not found</p>
+                    <p style="margin-top: 20px; font-size: 0.9em;">Please complete registration first.</p>
+                    <div class="action-buttons" style="margin-top: 30px;">
+                        <button class="btn btn-primary" onclick="window.location.href='/register.html'">➕ Register Now</button>
+                    </div>
+                `;
+                return;
+            }
+
+            patientId = info.patientId;
+            patientName = info.name;
+
+            // Store in sessionStorage for persistence
+            if (window.sessionStorage) {
+                sessionStorage.setItem('hemoglobin-patient-info', JSON.stringify(info));
+            }
+
+            // Initial update
+            await updateStatus();
+
+            // Set up periodic updates
+            statusUpdateInterval = setInterval(updateStatus, UPDATE_INTERVAL);
+
+            // Listen for storage changes (other tabs)
+            window.addEventListener('storage', async (e) => {
+                if (e.key === 'hemoglobin-event') {
+                    try {
+                        const event = JSON.parse(e.newValue);
+                        if (event.type === 'patient-queued' && event.patientId === patientId) {
+                            await updateStatus();
+                        }
+                    } catch (err) {
+                        console.warn('Failed to parse storage event:', err);
+                    }
+                }
+            });
+        }
+
+        // Start when page loads
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (statusUpdateInterval) {
+                clearInterval(statusUpdateInterval);
+            }
+        });
+    </script>
+</body>
+</html>

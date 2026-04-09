@@ -7,96 +7,181 @@
     <link rel="stylesheet" href="style.css">
     <style>
         .queue-display {
-            max-width: 600px;
-            margin: 0 auto;
+            max-width: 100%;
+            padding: 0 16px;
         }
+
+        @media (min-width: 768px) {
+            .queue-display {
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 0;
+            }
+        }
+
         .now-serving {
             background: linear-gradient(135deg, var(--success-color), var(--secondary-color));
             color: white;
-            padding: 40px;
+            padding: 30px 20px;
             border-radius: 15px;
             text-align: center;
             margin-bottom: 30px;
             box-shadow: var(--shadow);
         }
+
+        @media (min-width: 768px) {
+            .now-serving {
+                padding: 40px;
+            }
+        }
+
         .now-serving h2 {
             color: white;
             border: none;
             margin-bottom: 10px;
+            font-size: 0.95em;
         }
+
         .now-serving .patient-name {
-            font-size: 2.5em;
+            font-size: 2.2em;
             font-weight: 700;
             margin: 20px 0;
+            word-break: break-word;
         }
+
+        @media (min-width: 768px) {
+            .now-serving .patient-name {
+                font-size: 2.5em;
+            }
+        }
+
         .now-serving .position {
-            font-size: 1.2em;
+            font-size: 1.1em;
             opacity: 0.9;
         }
+
         .queue-list {
             background: var(--card-bg);
             border-radius: 10px;
-            padding: 20px;
+            padding: 16px;
             box-shadow: var(--shadow);
         }
+
+        @media (min-width: 768px) {
+            .queue-list {
+                padding: 20px;
+            }
+        }
+
+        .queue-list h3 {
+            margin-bottom: 20px;
+            color: var(--text-dark);
+        }
+
         .queue-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px;
+            padding: 16px;
             border-bottom: 1px solid var(--border-color);
             transition: background 0.2s;
+            gap: 12px;
+            flex-wrap: wrap;
         }
+
+        @media (max-width: 480px) {
+            .queue-item {
+                padding: 14px 12px;
+                min-height: 50px;
+            }
+        }
+
         .queue-item:hover {
             background: var(--light-bg);
         }
+
         .queue-item:first-child {
             background: #fff3cd;
             font-weight: 600;
         }
+
         .queue-item .position {
             font-size: 1.5em;
             font-weight: 700;
             color: var(--primary-color);
             min-width: 40px;
+            text-align: center;
         }
+
         .queue-item .name {
             flex: 1;
-            font-size: 1.2em;
-            margin: 0 15px;
+            font-size: 1.1em;
+            min-width: 150px;
+            word-break: break-word;
         }
+
         .queue-item .actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            flex-shrink: 0;
         }
+
         .btn {
-            padding: 8px 16px;
+            padding: 10px 14px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             font-size: 0.9em;
+            font-weight: 600;
+            touch-action: manipulation;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
+
+        @media (max-width: 480px) {
+            .btn {
+                padding: 10px 12px;
+                font-size: 0.85em;
+            }
+        }
+
         .btn-cancel {
             background: var(--danger-color);
             color: white;
         }
+
+        .btn-cancel:active {
+            opacity: 0.8;
+        }
+
         .btn-call {
             background: var(--secondary-color);
             color: white;
         }
+
+        .btn-call:active {
+            opacity: 0.8;
+        }
+
         .empty-queue {
             text-align: center;
-            padding: 40px;
+            padding: 30px 20px;
             color: var(--text-light);
         }
+
         .empty-queue h3 {
-            font-size: 1.5em;
+            font-size: 1.4em;
             margin-bottom: 10px;
+            color: var(--text-dark);
         }
+
         .header-actions {
             display: flex;
             gap: 10px;
         }
+
         .workflow-note {
             background: #eef4fb;
             border: 1px solid #cdddf1;
@@ -106,23 +191,65 @@
             margin-bottom: 20px;
             font-size: 0.95em;
         }
+
         .btn-primary {
             background: white;
             color: var(--primary-color);
-            padding: 10px 20px;
+            padding: 12px 20px;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
+            font-size: 1em;
+            min-height: 44px;
+            touch-action: manipulation;
         }
+
+        .btn-primary:active {
+            opacity: 0.8;
+        }
+
         .refresh-btn {
             background: rgba(255, 255, 255, 0.3);
             color: white;
-            padding: 10px 20px;
+            padding: 12px 20px;
             border: 2px solid white;
             border-radius: 8px;
             cursor: pointer;
             font-weight: 600;
+            font-size: 1em;
+            min-height: 44px;
+            touch-action: manipulation;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .refresh-btn:active {
+            opacity: 0.8;
+        }
+
+        /* Share panel styling */
+        .share-panel {
+            display: none;
+            margin-bottom: 20px;
+            padding: 16px;
+            background: #f0f4ff;
+            border-radius: 10px;
+        }
+
+        .share-panel.show {
+            display: block;
+        }
+
+        @media (max-width: 600px) {
+            header h1 {
+                font-size: 1.6em;
+            }
+
+            .now-serving .patient-name {
+                font-size: 2em;
+            }
         }
     </style>
 </head>
@@ -191,8 +318,15 @@
     </div>
 
     <script>
-        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:3000' : '';
-        const QUEUE_URL = window.location.href;
+        const API_BASE = window.location.search.includes('test=1') ? 'http://localhost:5000' : '';
+        const MOBILE_BASE_URL = (() => {
+            const { hostname, origin } = window.location;
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return 'http://10.243.230.122:5000';
+            }
+            return origin;
+        })();
+        const QUEUE_URL = `${MOBILE_BASE_URL}/queue.html`;
         let currentPatientId = null;
 
         function setShareStatus(text) {
@@ -250,48 +384,82 @@
                 setShareStatus('Could not copy the link.');
             }
         });
-        
-        async function refreshQueue() {
-            try {
-                const response = await fetch(API_BASE + '/api/queue');
-                const data = await response.json();
-                
-                const currentEl = document.getElementById('currentPatient');
-                const positionEl = document.getElementById('positionDisplay');
-                const listEl = document.getElementById('queueList');
-                
-                if (data.total > 0 && data.queue.length > 0) {
-                    currentEl.textContent = data.queue[0].patientName;
-                    positionEl.textContent = 'Position #' + data.queue[0].position + ' in queue';
-                    currentPatientId = data.queue[0].patientId;
-                    
-                    let html = '';
-                    for (let i = 0; i < data.queue.length; i++) {
-                        const q = data.queue[i];
-                        html += `
-                            <div class="queue-item">
-                                <span class="position">#${q.position}</span>
-                                <span class="name">${q.patientName}</span>
-                                <div class="actions"></div>
-                            </div>
-                        `;
-                    }
-                    listEl.innerHTML = html;
-                } else {
-                    currentEl.textContent = '--';
-                    positionEl.textContent = 'Queue is empty';
-                    currentPatientId = null;
-                    listEl.innerHTML = `
-                        <div class="empty-queue">
-                            <h3>No patients waiting</h3>
-                            <p>Register a patient to add them to the queue.</p>
+
+        async function fetchStateSnapshot() {
+            const response = await fetch(API_BASE + '/api/state');
+            const data = await response.json();
+            if (!response.ok || !data.success || !data.state) {
+                throw new Error(data.error || 'Failed to fetch state snapshot');
+            }
+            return data.state;
+        }
+
+        function renderFromState(state) {
+            const currentEl = document.getElementById('currentPatient');
+            const positionEl = document.getElementById('positionDisplay');
+            const listEl = document.getElementById('queueList');
+            const workflowNote = document.getElementById('workflowNote');
+
+            if (state.canMeasure && state.activePatientName) {
+                currentEl.textContent = state.activePatientName;
+                positionEl.textContent = 'Diagnosis in progress';
+                workflowNote.textContent = `Called patient: ${state.activePatientName}. Please place finger on sensor.`;
+            } else if (state.queueCount > 0 && state.nextPatientName) {
+                currentEl.textContent = state.nextPatientName;
+                positionEl.textContent = 'Position #1 in queue';
+                workflowNote.textContent = `Next patient to be called: ${state.nextPatientName}`;
+            } else {
+                currentEl.textContent = '--';
+                positionEl.textContent = 'Queue is empty';
+                workflowNote.textContent = 'No patient in queue.';
+            }
+
+            if (Array.isArray(state.queue) && state.queue.length > 0) {
+                currentPatientId = state.queue[0].patientId;
+                let html = '';
+                for (const q of state.queue) {
+                    html += `
+                        <div class="queue-item">
+                            <span class="position">#${q.position}</span>
+                            <span class="name">${q.patientName}</span>
+                            <div class="actions"></div>
                         </div>
                     `;
                 }
-
-                await refreshWorkflow();
+                listEl.innerHTML = html;
+            } else {
+                currentPatientId = null;
+                listEl.innerHTML = `
+                    <div class="empty-queue">
+                        <h3>No patients waiting</h3>
+                        <p>Register a patient to add them to the queue.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        async function refreshQueue() {
+            try {
+                const state = await fetchStateSnapshot();
+                renderFromState(state);
             } catch (err) {
-                console.error('Error fetching queue:', err);
+                // Legacy fallback for firmware-only deployments.
+                try {
+                    const response = await fetch(API_BASE + '/api/queue');
+                    const data = await response.json();
+
+                    const state = {
+                        canMeasure: false,
+                        activePatientName: '',
+                        queueCount: data.total || 0,
+                        nextPatientName: data.nextPatient || '',
+                        queue: Array.isArray(data.queue) ? data.queue : []
+                    };
+                    renderFromState(state);
+                    await refreshWorkflow();
+                } catch (fallbackErr) {
+                    console.error('Error fetching queue:', fallbackErr);
+                }
             }
         }
 
@@ -316,12 +484,24 @@
         
         async function removeFromQueue(patientId) {
             try {
-                const response = await fetch(API_BASE + '/api/queue', {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ patientId: String(patientId) }).toString()
-                });
-                await response.json();
+                try {
+                    const response = await fetch(API_BASE + '/api/commands', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'remove_from_queue', patientId: String(patientId) })
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.error || 'remove_from_queue failed');
+                    }
+                } catch (_) {
+                    const response = await fetch(API_BASE + '/api/queue', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({ patientId: String(patientId) }).toString()
+                    });
+                    await response.json();
+                }
                 refreshQueue();
             } catch (err) {
                 console.error('Error removing from queue:', err);
