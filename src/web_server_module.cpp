@@ -805,6 +805,64 @@ void WebServerModule::setupRestAPI()
     serializeJson(doc, response);
     request->send(200, "application/json", response); });
 
+  // GET /api/state - Current system state
+  server.on("/api/state", HTTP_GET, [this](AsyncWebServerRequest *request)
+            {
+    JsonDocument doc;
+    doc["success"] = true;
+    
+    JsonObject state = doc["state"].to<JsonObject>();
+    state["stateVersion"] = millis(); // Use timestamp as version
+    
+    // Add queue
+    int queueCount = 0;
+    QueueEntry* queueEntries = patientManager.getQueue(&queueCount);
+    JsonArray queueArr = state["queue"].to<JsonArray>();
+    for (int i = 0; i < queueCount; i++) {
+      JsonObject q = queueArr.add<JsonObject>();
+      q["patientId"] = queueEntries[i].patientId;
+      q["patientName"] = queueEntries[i].patientName;
+      q["position"] = queueEntries[i].position;
+    }
+    
+    // Add active patient info
+    state["activePatientId"] = activePatientId;
+    state["activePatientName"] = activePatientName;
+    state["diagnosisActive"] = diagnosisActive;
+    
+    // Determine workflow stage
+    String workflowStage = "IDLE";
+    if (diagnosisActive) {
+      if (getFingerDetected() && getMeasurementInProgress()) {
+        workflowStage = "MEASURING";
+      } else {
+        workflowStage = "WAITING_FOR_FINGER";
+      }
+    } else if (queueCount > 0) {
+      workflowStage = "READY_TO_CALL";
+    }
+    state["workflowStage"] = workflowStage;
+    
+    // Add current measurement if available
+    if (measurementEngine) {
+      const Measurement& m = measurementEngine->getMeasurement();
+      if (m.isValid) {
+        state["currentMeasurement"]["heartRate"] = m.heartRate;
+        state["currentMeasurement"]["spO2"] = m.spo2;
+        state["currentMeasurement"]["hemoglobin"] = m.hemoglobin;
+        state["currentMeasurement"]["status"] = m.status;
+      }
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    
+    AsyncWebServerResponse *httpResponse = request->beginResponse(200, "application/json", response);
+    httpResponse->addHeader("Access-Control-Allow-Origin", "*");
+    httpResponse->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpResponse->addHeader("Access-Control-Allow-Headers", "Content-Type");
+    request->send(httpResponse); });
+
   server.on("/api/history", HTTP_GET, [this](AsyncWebServerRequest *request)
             {
     int limit = 5;

@@ -67,11 +67,10 @@ void setup()
   }
 
   // Initialize WiFi (non-critical - web server can work offline)
-  wifiManager.begin(false);
+ wifiManager.begin(false);// Force WiFi config portal mode
 
   // Initialize web server (works with or without WiFi)
-  webServer.begin(&engine, false); // false = WiFi not required
-
+webServer.begin(&engine, false);  // false = WiFi not required
   // System ready
   lcd.showReady();
   delay(1500);

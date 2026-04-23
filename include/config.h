@@ -29,11 +29,10 @@
 
 // ==================== WIFI CONFIGURATION ====================
 #define WIFI_TIMEOUT_MS 15000 // 15 second timeout for WiFi connection attempt
-#define WIFI_SSID "Galaxy M16 5G "
-#define WIFI_PASSWORD "maman10@"
+#define WIFI_SSID "Dikroucha"
+#define WIFI_PASSWORD "ffaffaffa"
 #define WIFI_AP_SSID "Hemoglobin_Detector"
 #define WIFI_AP_PASSWORD "password"
-
 // ==================== WEB SERVER CONFIGURATION ====================
 #define WEB_SERVER_PORT 80
 #define MEASUREMENT_HISTORY_SIZE 60

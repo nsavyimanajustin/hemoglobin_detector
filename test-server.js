@@ -8,7 +8,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
 // Bridge configuration
-const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || 'http://10.243.230.127').replace(/\/+$/, '');
+const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || 'http://10.243.230.122').replace(/\/+$/, '');
 const BRIDGE_ENABLED = process.env.ESP32_BRIDGE !== '0';
 const SERIAL_BRIDGE_ENABLED = process.env.ENABLE_SERIAL_BRIDGE !== '0';
 const SERIAL_PORT_PATH = process.env.SERIAL_PORT_PATH || '/dev/ttyUSB0';
