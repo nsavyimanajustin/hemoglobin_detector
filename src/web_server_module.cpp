@@ -1087,6 +1087,38 @@ void WebServerModule::setupRestAPI()
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response); });
+
+  // POST /api/test/activate - Immediately activate diagnosis (for testing without WiFi)
+  // This allows test-server to tell ESP32 that a patient is ready
+  server.on("/api/test/activate", HTTP_POST, [this](AsyncWebServerRequest *request)
+            {
+    String patientName = "Test Patient";
+    if (request->hasParam("name", true)) {
+      patientName = request->getParam("name", true)->value();
+    } else if (request->hasParam("name")) {
+      patientName = request->getParam("name")->value();
+    }
+    
+    // Create a test patient entry
+    activePatientId = "test-" + String(millis());
+    activePatientName = patientName;
+    diagnosisActive = true;
+    patientJustCalled = true;
+    
+    debug.header("=== TEST MODE: PATIENT ACTIVATED ===");
+    debug.log(DEBUG_INFO, "Patient", patientName);
+    debug.info("Ready for finger detection testing");
+    debug.footer();
+    
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["patientId"] = activePatientId;
+    doc["patientName"] = activePatientName;
+    doc["message"] = String("Test patient activated: ") + patientName;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
 }
 
 bool WebServerModule::startDiagnosis(const String &patientId)

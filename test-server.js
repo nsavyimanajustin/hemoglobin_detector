@@ -37,7 +37,7 @@ const serialLog = [];
 
 let stateVersion = 1;
 const startedAt = Date.now();
-let espOnline = false;
+let espOnline = true;  // Default to true for local test mode (test-server simulates ESP32)
 let lastBridgeError = '';
 let espEventStream = null;
 let serialPortInstance = null;
@@ -385,6 +385,9 @@ async function getBridgeState() {
 
 async function getUnifiedState() {
   if (!BRIDGE_ENABLED) {
+    // Local mode - always online
+    espOnline = true;
+    lastBridgeError = '';
     return getLocalFallbackState();
   }
 
@@ -752,6 +755,25 @@ app.post('/api/commands', async (req, res) => {
 app.post('/api/patients', async (req, res) => {
   try {
     const result = await executeCommand('register_patient', req.body || {});
+    
+    // Also notify ESP32 to activate this patient for testing
+    // This allows LCD and serial monitor to show patient is ready immediately
+    try {
+      const patientName = req.body?.name || 'Test Patient';
+      const esp32Response = await fetch('http://localhost/api/test/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `name=${encodeURIComponent(patientName)}`,
+      }).catch(() => null); // Silently fail if ESP32 not reachable
+      
+      if (esp32Response?.ok) {
+        appendSerialLogLine(`ESP32_ACTIVATED: ${patientName}`, 'BRIDGE_INFO');
+      }
+    } catch (e) {
+      // ESP32 activation optional - don't block patient registration
+      appendSerialLogLine(`ESP32_ACTIVATION_FAILED: ${e.message}`, 'BRIDGE_WARN');
+    }
+    
     return res.json({ success: true, patientId: result.patientId, message: 'Patient registered successfully' });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message || 'Failed to register patient' });
@@ -869,8 +891,10 @@ app.get('/api/history', async (req, res) => {
 
 app.get('/api/status', async (req, res) => {
   const state = await getUnifiedState();
+  // In local mode (BRIDGE_ENABLED=false), always show as online
+  const isOnline = !BRIDGE_ENABLED ? true : espOnline;
   return res.json({
-    system: espOnline ? 'online' : 'degraded',
+    system: isOnline ? 'online' : 'degraded',
     uptime_ms: state.uptime_ms || 0,
     has_measurement: Boolean(state.measurements && state.measurements.valid),
     canMeasure: Boolean(state.canMeasure),
@@ -887,7 +911,7 @@ app.get('/api/status', async (req, res) => {
     stateVersion: state.stateVersion || stateVersion,
     lcd: state.lcd || null,
     bridge: {
-      espOnline,
+      espOnline: isOnline,
       lastBridgeError,
       espBaseUrl: ESP32_BASE_URL,
     },

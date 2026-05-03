@@ -71,6 +71,7 @@ void setup()
 
   // Initialize web server (works with or without WiFi)
 webServer.begin(&engine, false);  // false = WiFi not required
+
   // System ready
   lcd.showReady();
   delay(1500);
@@ -247,7 +248,7 @@ void loop()
     }
     else
     {
-      // Still measuring
+      // Still measuring - propagate real-time finger state to dashboard
       if (engine.isFingerDetected())
       {
         if (!transientDisplayActive)
@@ -258,6 +259,8 @@ void loop()
         {
           measurementInProgress = true;
         }
+        // Propagate finger detection state in real-time even before measurement is valid
+        webServer.updateMeasurementState(true, true, lastMeasuredHeartRate, lastMeasuredSpO2, lastMeasuredHemoglobin, lastMeasurementStatus);
       }
       else
       {
@@ -269,6 +272,8 @@ void loop()
         {
           measurementInProgress = false;
         }
+        // Propagate finger removed state in real-time even before measurement is valid
+        webServer.updateMeasurementState(false, false, lastMeasuredHeartRate, lastMeasuredSpO2, lastMeasuredHemoglobin, lastMeasurementStatus);
       }
     }
   }

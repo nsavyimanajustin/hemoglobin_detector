@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Debug Monitor - Hemoglobin Detector</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+            height: 100vh;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: #007acc;
+            padding: 12px;
+            font-weight: bold;
+            color: white;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+            padding: 4px;
+            line-height: 1.4;
+        }
+
+        .log-timestamp {
+            color: #858585;
+        }
+
+        .log-info {
+            color: #9cdcfe;
+        }
+
+        .log-success {
+            color: #4ec9b0;
+        }
+
+        .log-warning {
+            color: #dcdcaa;
+        }
+
+        .log-error {
+            color: #f48771;
+        }
+
+        .state-box {
+            background: #1e1e1e;
+            border: 1px solid #3e3e42;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+        }
+
+        .state-label {
+            color: #858585;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .state-value {
+            color: #4ec9b0;
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .state-value.inactive {
+            color: #f48771;
+        }
+
+        .state-value.true {
+            color: #4ec9b0;
+        }
+
+        .state-value.false {
+            color: #f48771;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .measurement-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 1s infinite;
+        }
+
+        .status-indicator.online {
+            background: #4ec9b0;
+        }
+
+        .status-indicator.offline {
+            background: #f48771;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .scroll-area {
+            max-height: 400px;
+        }
+
+        .measurement-value {
+            font-size: 14px;
+            color: #9cdcfe;
+        }
+
+        .control-buttons {
+            padding: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #005a9e;
+        }
+
+        button:active {
+            background: #003d73;
+        }
+
+        .clear-btn {
+            background: #6a4c4c;
+        }
+
+        .clear-btn:hover {
+            background: #8b5a5a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel: Device Status & Measurements -->
+        <div class="panel">
+            <div class="panel-header">Device Status & Measurements</div>
+            <div class="panel-content scroll-area">
+                <div class="state-box">
+                    <div class="state-label">System Status</div>
+                    <div>
+                        <span class="status-indicator offline" id="statusIndicator"></span>
+                        <span id="statusText">CONNECTING...</span>
+                    </div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Finger Detection</div>
+                    <div class="state-value" id="fingerDetected">OFF</div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Measurement In Progress</div>
+                    <div class="state-value" id="measurementInProgress">FALSE</div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Active Patient</div>
+                    <div class="state-value" id="activePatientName" style="font-size: 16px; color: #9cdcfe;">None</div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Measurements</div>
+                    <div class="measurement-grid">
+                        <div>
+                            <div class="state-label">HR (BPM)</div>
+                            <div class="measurement-value" id="heartRate">--</div>
+                        </div>
+                        <div>
+                            <div class="state-label">SpO2 (%)</div>
+                            <div class="measurement-value" id="spo2">--</div>
+                        </div>
+                        <div>
+                            <div class="state-label">Hemoglobin (g/dL)</div>
+                            <div class="measurement-value" id="hemoglobin">--</div>
+                        </div>
+                        <div>
+                            <div class="state-label">Status</div>
+                            <div class="measurement-value" id="status">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Queue Count</div>
+                    <div class="state-value" id="queueCount">0</div>
+                </div>
+
+                <div class="state-box">
+                    <div class="state-label">Workflow Message</div>
+                    <div style="color: #9cdcfe; font-size: 13px; margin-top: 4px;" id="workflowMessage">Initializing...</div>
+                </div>
+            </div>
+            <div class="control-buttons">
+                <button onclick="refreshStatus()">Refresh Status</button>
+                <button class="clear-btn" onclick="clearLocalLogs()">Clear Logs</button>
+            </div>
+        </div>
+
+        <!-- Right Panel: Event Log -->
+        <div class="panel">
+            <div class="panel-header">Real-Time Event Log</div>
+            <div class="panel-content" id="eventLog"></div>
+            <div class="control-buttons">
+                <button class="clear-btn" onclick="clearEventLog()">Clear Log</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ESP32_IP = localStorage.getItem('esp32Ip') || 'http://192.168.4.1';
+        const API_TIMEOUT = 5000;
+        let lastUpdateTime = 0;
+        const UPDATE_INTERVAL = 500; // ms
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString('en-US', { 
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span> ${message}`;
+            
+            const logPanel = document.getElementById('eventLog');
+            logPanel.insertBefore(logEntry, logPanel.firstChild);
+
+            // Keep only last 100 entries
+            while (logPanel.children.length > 100) {
+                logPanel.removeChild(logPanel.lastChild);
+            }
+
+            // Also log to browser console
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        function updateUI(data) {
+            if (!data) return;
+
+            // Update status indicator
+            const statusIndicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            statusIndicator.className = 'status-indicator online';
+            statusText.textContent = 'ONLINE';
+
+            // Update finger detection
+            const fingerDetected = document.getElementById('fingerDetected');
+            if (data.fingerDetected) {
+                fingerDetected.textContent = 'ON';
+                fingerDetected.className = 'state-value true';
+            } else {
+                fingerDetected.textContent = 'OFF';
+                fingerDetected.className = 'state-value false';
+            }
+
+            // Update measurement in progress
+            const measurementInProgress = document.getElementById('measurementInProgress');
+            if (data.measurementInProgress) {
+                measurementInProgress.textContent = 'TRUE';
+                measurementInProgress.className = 'state-value true';
+            } else {
+                measurementInProgress.textContent = 'FALSE';
+                measurementInProgress.className = 'state-value false';
+            }
+
+            // Update measurements
+            document.getElementById('heartRate').textContent = data.heartRate || '--';
+            document.getElementById('spo2').textContent = (data.spo2 || data.spO2 || '--').toFixed(1);
+            document.getElementById('hemoglobin').textContent = (data.hemoglobin || '--').toFixed(1);
+            document.getElementById('status').textContent = data.status || '--';
+            document.getElementById('activePatientName').textContent = data.activePatientName || 'None';
+            document.getElementById('queueCount').textContent = data.queueCount || '0';
+            document.getElementById('workflowMessage').textContent = data.workflowMessage || 'Idle';
+        }
+
+        async function refreshStatus() {
+            const now = Date.now();
+            if (now - lastUpdateTime < UPDATE_INTERVAL) return;
+            lastUpdateTime = now;
+
+            try {
+                const response = await fetch(`${ESP32_IP}/api/measurements`, {
+                    method: 'GET',
+                    timeout: API_TIMEOUT
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                updateUI(data);
+
+                // Log state changes
+                const storedData = sessionStorage.getItem('lastApiData');
+                const lastData = storedData ? JSON.parse(storedData) : {};
+                
+                if (lastData.fingerDetected !== data.fingerDetected) {
+                    log(`Finger: ${data.fingerDetected ? 'PLACED' : 'REMOVED'}`, data.fingerDetected ? 'success' : 'warning');
+                }
+                
+                if (lastData.measurementInProgress !== data.measurementInProgress) {
+                    log(`Measurement: ${data.measurementInProgress ? 'STARTED' : 'STOPPED'}`, data.measurementInProgress ? 'success' : 'warning');
+                }
+
+                if (lastData.activePatientName !== data.activePatientName && data.activePatientName) {
+                    log(`Patient: ${data.activePatientName}`, 'info');
+                }
+
+                sessionStorage.setItem('lastApiData', JSON.stringify(data));
+
+            } catch (error) {
+                document.getElementById('statusIndicator').className = 'status-indicator offline';
+                document.getElementById('statusText').textContent = 'OFFLINE';
+                log(`API Error: ${error.message}`, 'error');
+            }
+        }
+
+        function setupEventStream() {
+            const eventSource = new EventSource(`${ESP32_IP}/events`);
+
+            eventSource.addEventListener('open', function() {
+                log('Event stream connected', 'success');
+            });
+
+            eventSource.addEventListener('PATIENT_REGISTERED', function(event) {
+                const details = JSON.parse(event.data);
+                log(`✓ PATIENT_REGISTERED: ${details.message}`, 'success');
+            });
+
+            eventSource.addEventListener('PATIENT_QUEUED', function(event) {
+                const details = JSON.parse(event.data);
+                log(`✓ PATIENT_QUEUED: ${details.message}`, 'success');
+            });
+
+            eventSource.addEventListener('DIAGNOSIS_STARTED', function(event) {
+                const details = JSON.parse(event.data);
+                log(`▶ DIAGNOSIS_STARTED: ${details.message}`, 'info');
+            });
+
+            eventSource.addEventListener('FINGER_PLACED', function(event) {
+                const details = JSON.parse(event.data);
+                log(`✓ FINGER PLACED: ${details.message}`, 'success');
+            });
+
+            eventSource.addEventListener('FINGER_REMOVED', function(event) {
+                const details = JSON.parse(event.data);
+                log(`✗ FINGER REMOVED: ${details.message}`, 'warning');
+            });
+
+            eventSource.addEventListener('MEASUREMENT_COMPLETE', function(event) {
+                const details = JSON.parse(event.data);
+                log(`✓ MEASUREMENT_COMPLETE: ${details.message}`, 'success');
+            });
+
+            eventSource.onerror = function() {
+                log('Event stream disconnected', 'error');
+                eventSource.close();
+                // Attempt reconnection after 3 seconds
+                setTimeout(() => {
+                    log('Attempting event stream reconnection...', 'warning');
+                    setupEventStream();
+                }, 3000);
+            };
+
+            return eventSource;
+        }
+
+        function clearEventLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            log('Event log cleared', 'info');
+        }
+
+        function clearLocalLogs() {
+            sessionStorage.removeItem('lastApiData');
+            log('Local state cleared', 'info');
+        }
+
+        // Initialize
+        window.addEventListener('load', function() {
+            log('Debug Monitor Started', 'info');
+            log(`ESP32 Target: ${ESP32_IP}`, 'info');
+            
+            // Start polling API
+            setInterval(refreshStatus, UPDATE_INTERVAL);
+            
+            // Setup event stream
+            setupEventStream();
+            
+            // Initial refresh
+            refreshStatus();
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'r') {
+                e.preventDefault();
+                refreshStatus();
+                log('Manual refresh triggered', 'info');
+            }
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                clearEventLog();
+            }
+        });
+    </script>
+</body>
+</html>
