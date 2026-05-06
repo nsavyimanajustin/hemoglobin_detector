@@ -1,0 +1,8 @@
+CompileFlags:
+  Remove:
+    - -mlongcalls
+    - -mlong-calls
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+  Add:
+    - -D__int24=int
