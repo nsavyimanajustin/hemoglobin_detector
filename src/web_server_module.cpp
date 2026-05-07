@@ -75,6 +75,26 @@ static void addLcdState(JsonObject lcd,
   lcd["line4"] = "to begin scan";
 }
 
+void WebServerModule::setSystemOnline(bool online, const String &reason)
+{
+  if (systemOnline == online)
+  {
+    return;
+  }
+
+  systemOnline = online;
+  if (online)
+  {
+    systemReadyAt = millis();
+    debug.info("System Ready!");
+    publishEvent("system_ready", "Hardware initialized and ready", reason);
+  }
+  else
+  {
+    publishEvent("system_offline", "Hardware is offline", reason);
+  }
+}
+
 void WebServerModule::publishEvent(const String &eventType, const String &message, const String &details)
 {
   JsonDocument doc;
@@ -620,6 +640,8 @@ bool WebServerModule::begin(MeasurementEngine *engine, bool requireWiFi)
 
   measurementEngine = engine;
   wifiRequired = requireWiFi;
+  systemOnline = false;
+  systemReadyAt = 0;
 
   // Initialize SPIFFS
   debug.info("Mounting SPIFFS filesystem...");
@@ -689,6 +711,7 @@ void WebServerModule::stop()
 {
   if (running)
   {
+    setSystemOnline(false, "web_server_stopped");
     server.end();
     running = false;
     debug.info("Web server stopped");
@@ -762,7 +785,7 @@ void WebServerModule::setupRestAPI()
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request)
             {
     JsonDocument doc;
-    doc["system"] = "online";
+    doc["system"] = systemOnline ? "online" : "offline";
     doc["uptime_ms"] = millis();
     doc["has_measurement"] = measurementEngine->getMeasurement().isValid;
     doc["canMeasure"] = canMeasure();
@@ -772,6 +795,9 @@ void WebServerModule::setupRestAPI()
     doc["diagnosisActive"] = diagnosisActive;
     doc["queueCount"] = patientManager.getQueueCount();
     doc["nextPatientName"] = getNextQueuedPatientName();
+    JsonObject bridge = doc["bridge"].to<JsonObject>();
+    bridge["espOnline"] = systemOnline;
+    bridge["readyAtMs"] = systemReadyAt;
     doc["workflowMessage"] = canMeasure()
       ? String("Diagnosing: ") + activePatientName
       : (patientManager.getQueueCount() > 0

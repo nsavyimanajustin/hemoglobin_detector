@@ -106,8 +106,17 @@ function startEventStream() {
         ['patient_registered', 'api_patient_registered',
          'patient_queued', 'api_patient_queued',
          'diagnosis_started', 'measurement_complete',
-         'diagnosis_completed', 'next_patient_called', 'queue_empty']
+         'diagnosis_completed', 'next_patient_called', 'queue_empty',
+         'system_ready', 'system_offline']
             .forEach(type => eventStream.addEventListener(type, handleStateEvent));
+
+        eventStream.addEventListener('system_ready', () => {
+            setHardwareOnlineState(true);
+        });
+
+        eventStream.addEventListener('system_offline', () => {
+            setHardwareOnlineState(false);
+        });
 
         eventStream.addEventListener('state_snapshot', handleStateEvent);
         eventStream.addEventListener('state_updated', () => {
@@ -117,6 +126,7 @@ function startEventStream() {
 
         eventStream.onerror = () => {
             console.warn('Live event stream disconnected; retrying...');
+            setHardwareOnlineState(false);
             if (eventStream) { eventStream.close(); eventStream = null; }
             if (!eventStreamRetryTimer) {
                 eventStreamRetryTimer = setTimeout(() => {
@@ -188,6 +198,10 @@ function initializeCharts() {
 function inferHardwareOnline(state, bridge) {
     if (bridge && typeof bridge.espOnline === 'boolean') {
         return bridge.espOnline;
+    }
+
+    if (state && typeof state.system === 'string') {
+        return state.system.toLowerCase() === 'online';
     }
 
     if (state && typeof state.source === 'string') {
@@ -358,6 +372,8 @@ async function fetchQueueStatus() {
         const event = new CustomEvent('queueUpdated', { detail: data });
         window.dispatchEvent(event);
     } catch (_) {}
+
+        setHardwareOnlineState(false);
 }
 
 function normalizeHistoryItem(item) {
@@ -664,11 +680,7 @@ async function fetchStatus() {
         if (!response.ok) return;
         const data = await response.json();
 
-        if (data.bridge && typeof data.bridge.espOnline === 'boolean') {
-            setHardwareOnlineState(data.bridge.espOnline);
-        } else if (typeof data.system === 'string') {
-            setHardwareOnlineState(data.system.toLowerCase() === 'online');
-        }
+        setHardwareOnlineState(inferHardwareOnline(data, data.bridge));
 
         currentQueueCount = Number(data.queueCount || currentQueueCount || 0);
         currentNextPatientName = String(data.nextPatientName || currentNextPatientName || '');
@@ -692,7 +704,9 @@ async function fetchStatus() {
                 : (data.queueCount > 0 ? 'Patient queued — starting diagnosis...' : 'Register and queue a patient first');
         }
 
-    } catch (_) {}
+    } catch (_) {
+        setHardwareOnlineState(false);
+    }
 }
 
 function formatTime(date) {

@@ -76,6 +76,8 @@ void setup()
   lcd.showReady();
   delay(1500);
 
+  webServer.setSystemOnline(true, "startup_complete");
+
   debug.info("System initialization complete");
   debug.info("Waiting for patient registration and queue selection...");
 

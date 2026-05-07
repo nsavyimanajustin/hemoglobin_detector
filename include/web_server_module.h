@@ -90,6 +90,8 @@ private:
   bool workflowNoticePending = false;
   String workflowNoticeLine1 = "";
   String workflowNoticeLine2 = "";
+  bool systemOnline = false;
+  unsigned long systemReadyAt = 0;
 
   // State for dashboard propagation
   bool lastFingerState = false;
@@ -132,6 +134,8 @@ public:
 
   // Broadcast workflow events to serial monitor and browser clients
   void publishEvent(const String &eventType, const String &message, const String &details = "");
+  void setSystemOnline(bool online, const String &reason = "");
+  bool isSystemOnline() const { return systemOnline; }
 
   // Workflow helpers
   bool canMeasure() const { return diagnosisActive && activePatientId.length() > 0; }

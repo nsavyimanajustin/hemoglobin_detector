@@ -34,7 +34,10 @@ bool WiFiManagerModule::begin(bool forceConfigPortal)
       return true;
     }
 
-    debug.warn("Direct hotspot connection failed, falling back to WiFi config portal");
+    debug.warn("Direct hotspot connection failed; continuing offline without WiFi config portal");
+    connected = false;
+    debug.footer();
+    return false;
   }
 
   // Set up WiFiManager callbacks
